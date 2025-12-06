@@ -8,11 +8,33 @@ export const staffRoleEnum = pgEnum("staff_role", ["waiter", "kitchen", "owner"]
 export const orderStatusEnum = pgEnum("order_status", ["new", "in_progress", "ready", "delivered"]);
 export const paymentStatusEnum = pgEnum("payment_status", ["pending", "paid"]);
 export const callStatusEnum = pgEnum("call_status", ["pending", "acknowledged", "resolved"]);
+export const staffAssignmentStatusEnum = pgEnum("staff_assignment_status", ["pending", "approved", "revoked"]);
+export const spiceLevelEnum = pgEnum("spice_level", ["none", "mild", "medium", "hot", "extra_hot"]);
+export const portionSizeEnum = pgEnum("portion_size", ["light", "standard", "hearty"]);
+export const alcoholPreferenceEnum = pgEnum("alcohol_preference", ["none", "occasional", "preferred"]);
+export const caffeinePreferenceEnum = pgEnum("caffeine_preference", ["avoid", "limited", "regular"]);
+export const sweetnessPreferenceEnum = pgEnum("sweetness_preference", ["unsweetened", "lightly_sweet", "balanced", "very_sweet"]);
+export const priceSensitivityEnum = pgEnum("price_sensitivity", ["value", "moderate", "premium"]);
+
+// Restaurants table (multi-restaurant support)
+export const restaurants = pgTable("restaurants", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  address: text("address").notNull(),
+  phone: varchar("phone", { length: 20 }),
+  email: varchar("email", { length: 255 }),
+  description: text("description"),
+  logoUrl: varchar("logo_url", { length: 500 }),
+  ownerId: integer("owner_id"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
 
 // Configuration Tables
 export const categories = pgTable("categories", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 100 }).notNull(),
+  restaurantId: integer("restaurant_id").references(() => restaurants.id),
 });
 
 export const kitchenStations = pgTable("kitchen_stations", {
@@ -51,6 +73,19 @@ export const staff = pgTable("staff", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Staff restaurant assignments (links staff to restaurants with approval workflow)
+export const staffRestaurantAssignments = pgTable("staff_restaurant_assignments", {
+  id: serial("id").primaryKey(),
+  staffId: integer("staff_id").notNull().references(() => staff.id, { onDelete: "cascade" }),
+  restaurantId: integer("restaurant_id").notNull().references(() => restaurants.id, { onDelete: "cascade" }),
+  status: staffAssignmentStatusEnum("status").notNull().default("pending"),
+  requestedAt: timestamp("requested_at").defaultNow(),
+  approvedAt: timestamp("approved_at"),
+  approvedBy: integer("approved_by").references(() => staff.id),
+  revokedAt: timestamp("revoked_at"),
+  notes: text("notes"),
+});
+
 // Customer table (for diners using phone)
 export const customers = pgTable("customers", {
   id: serial("id").primaryKey(),
@@ -61,6 +96,38 @@ export const customers = pgTable("customers", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Customer preferences for myFilter system
+export const customerPreferences = pgTable("customer_preferences", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }).unique(),
+  dietaryRestrictions: text("dietary_restrictions").array(),
+  allergensToAvoid: text("allergens_to_avoid").array(),
+  dislikedIngredients: text("disliked_ingredients").array(),
+  preferredCuisines: text("preferred_cuisines").array(),
+  preferredProteins: text("preferred_proteins").array(),
+  spiceLevel: spiceLevelEnum("spice_level"),
+  preferredCookingMethods: text("preferred_cooking_methods").array(),
+  mealTypes: text("meal_types").array(),
+  beveragePreferences: text("beverage_preferences").array(),
+  alcoholPreference: alcoholPreferenceEnum("alcohol_preference"),
+  caffeinePreference: caffeinePreferenceEnum("caffeine_preference"),
+  sweetnessPreference: sweetnessPreferenceEnum("sweetness_preference"),
+  portionSize: portionSizeEnum("portion_size"),
+  calorieTargetMin: integer("calorie_target_min"),
+  calorieTargetMax: integer("calorie_target_max"),
+  priceSensitivity: priceSensitivityEnum("price_sensitivity"),
+  preferOrganic: boolean("prefer_organic").default(false),
+  preferLocallySourced: boolean("prefer_locally_sourced").default(false),
+  avoidSpicy: boolean("avoid_spicy").default(false),
+  avoidAlcohol: boolean("avoid_alcohol").default(false),
+  avoidCaffeine: boolean("avoid_caffeine").default(false),
+  lowSodium: boolean("low_sodium").default(false),
+  lowSugar: boolean("low_sugar").default(false),
+  highProtein: boolean("high_protein").default(false),
+  lowCarb: boolean("low_carb").default(false),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Menu Items & Composition
 export const menuItems = pgTable("menu_items", {
   id: serial("id").primaryKey(),
@@ -69,13 +136,35 @@ export const menuItems = pgTable("menu_items", {
   description: text("description"),
   imageUrl: varchar("image_url", { length: 500 }),
   nutritionalInfo: text("nutritional_info"),
+  calories: integer("calories"),
+  proteinGrams: decimal("protein_grams", { precision: 6, scale: 2 }),
+  carbsGrams: decimal("carbs_grams", { precision: 6, scale: 2 }),
+  fatGrams: decimal("fat_grams", { precision: 6, scale: 2 }),
+  fiberGrams: decimal("fiber_grams", { precision: 6, scale: 2 }),
+  sugarGrams: decimal("sugar_grams", { precision: 6, scale: 2 }),
+  sodiumMg: integer("sodium_mg"),
   isSoldOut: boolean("is_sold_out").default(false),
   categoryId: integer("category_id").references(() => categories.id),
   stationId: integer("station_id").references(() => kitchenStations.id),
+  restaurantId: integer("restaurant_id").references(() => restaurants.id),
   isVegan: boolean("is_vegan").default(false),
+  isVegetarian: boolean("is_vegetarian").default(false),
   isGlutenFree: boolean("is_gluten_free").default(false),
+  isDairyFree: boolean("is_dairy_free").default(false),
+  isNutFree: boolean("is_nut_free").default(false),
+  isHalal: boolean("is_halal").default(false),
+  isKosher: boolean("is_kosher").default(false),
   isSpicy: boolean("is_spicy").default(false),
+  spiceLevel: spiceLevelEnum("spice_level").default("none"),
   allergens: text("allergens").array(),
+  cuisineType: varchar("cuisine_type", { length: 100 }),
+  proteinType: varchar("protein_type", { length: 100 }),
+  cookingMethod: varchar("cooking_method", { length: 100 }),
+  mealType: varchar("meal_type", { length: 50 }),
+  isAlcoholic: boolean("is_alcoholic").default(false),
+  isCaffeinated: boolean("is_caffeinated").default(false),
+  isOrganic: boolean("is_organic").default(false),
+  isLocallySourced: boolean("is_locally_sourced").default(false),
 });
 
 export const recipes = pgTable("recipes", {
@@ -153,6 +242,9 @@ export const insertRestaurantTableSchema = createInsertSchema(restaurantTables).
 export const insertOrderTicketSchema = createInsertSchema(orderTickets).omit({ id: true, createdAt: true, completedAt: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
 export const insertTableCallSchema = createInsertSchema(tableCalls).omit({ id: true, createdAt: true, acknowledgedAt: true, resolvedAt: true });
+export const insertRestaurantSchema = createInsertSchema(restaurants).omit({ id: true, createdAt: true });
+export const insertCustomerPreferencesSchema = createInsertSchema(customerPreferences).omit({ id: true, updatedAt: true });
+export const insertStaffRestaurantAssignmentSchema = createInsertSchema(staffRestaurantAssignments).omit({ id: true, requestedAt: true, approvedAt: true, revokedAt: true });
 
 // Types
 export type InsertStaff = z.infer<typeof insertStaffSchema>;
@@ -173,6 +265,13 @@ export type OrderTicket = typeof orderTickets.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type TableCall = typeof tableCalls.$inferSelect;
 export type InsertTableCall = z.infer<typeof insertTableCallSchema>;
+
+export type Restaurant = typeof restaurants.$inferSelect;
+export type InsertRestaurant = z.infer<typeof insertRestaurantSchema>;
+export type CustomerPreference = typeof customerPreferences.$inferSelect;
+export type InsertCustomerPreference = z.infer<typeof insertCustomerPreferencesSchema>;
+export type StaffRestaurantAssignment = typeof staffRestaurantAssignments.$inferSelect;
+export type InsertStaffRestaurantAssignment = z.infer<typeof insertStaffRestaurantAssignmentSchema>;
 
 // API Request/Response Schemas
 export const staffSignUpSchema = z.object({
@@ -225,6 +324,63 @@ export const acknowledgeTableCallSchema = z.object({
   callId: z.number(),
 });
 
+export const createRestaurantSchema = z.object({
+  name: z.string().min(1, "Restaurant name is required"),
+  address: z.string().min(1, "Address is required"),
+  phone: z.string().optional(),
+  email: z.string().email().optional(),
+  description: z.string().optional(),
+  logoUrl: z.string().optional(),
+});
+
+export const ownerStaffSignUpSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  name: z.string().min(1, "Name is required"),
+  restaurant: createRestaurantSchema,
+});
+
+export const staffJoinRestaurantSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  name: z.string().min(1, "Name is required"),
+  role: z.enum(["waiter", "kitchen"]),
+  restaurantId: z.number().min(1, "Please select a restaurant"),
+});
+
+export const updateCustomerPreferencesSchema = z.object({
+  dietaryRestrictions: z.array(z.string()).optional(),
+  allergensToAvoid: z.array(z.string()).optional(),
+  dislikedIngredients: z.array(z.string()).optional(),
+  preferredCuisines: z.array(z.string()).optional(),
+  preferredProteins: z.array(z.string()).optional(),
+  spiceLevel: z.enum(["none", "mild", "medium", "hot", "extra_hot"]).optional(),
+  preferredCookingMethods: z.array(z.string()).optional(),
+  mealTypes: z.array(z.string()).optional(),
+  beveragePreferences: z.array(z.string()).optional(),
+  alcoholPreference: z.enum(["none", "occasional", "preferred"]).optional(),
+  caffeinePreference: z.enum(["avoid", "limited", "regular"]).optional(),
+  sweetnessPreference: z.enum(["unsweetened", "lightly_sweet", "balanced", "very_sweet"]).optional(),
+  portionSize: z.enum(["light", "standard", "hearty"]).optional(),
+  calorieTargetMin: z.number().optional(),
+  calorieTargetMax: z.number().optional(),
+  priceSensitivity: z.enum(["value", "moderate", "premium"]).optional(),
+  preferOrganic: z.boolean().optional(),
+  preferLocallySourced: z.boolean().optional(),
+  avoidSpicy: z.boolean().optional(),
+  avoidAlcohol: z.boolean().optional(),
+  avoidCaffeine: z.boolean().optional(),
+  lowSodium: z.boolean().optional(),
+  lowSugar: z.boolean().optional(),
+  highProtein: z.boolean().optional(),
+  lowCarb: z.boolean().optional(),
+});
+
+export const staffApprovalSchema = z.object({
+  staffId: z.number(),
+  action: z.enum(["approve", "revoke"]),
+});
+
 export type StaffSignUpRequest = z.infer<typeof staffSignUpSchema>;
 export type StaffSignInRequest = z.infer<typeof staffSignInSchema>;
 export type CustomerSignUpRequest = z.infer<typeof customerSignUpSchema>;
@@ -233,3 +389,17 @@ export type CreateOrderRequest = z.infer<typeof createOrderSchema>;
 export type UpdateOrderStatusRequest = z.infer<typeof updateOrderStatusSchema>;
 export type UpdatePaymentStatusRequest = z.infer<typeof updatePaymentStatusSchema>;
 export type CreateTableCallRequest = z.infer<typeof createTableCallSchema>;
+export type CreateRestaurantRequest = z.infer<typeof createRestaurantSchema>;
+export type OwnerStaffSignUpRequest = z.infer<typeof ownerStaffSignUpSchema>;
+export type StaffJoinRestaurantRequest = z.infer<typeof staffJoinRestaurantSchema>;
+export type UpdateCustomerPreferencesRequest = z.infer<typeof updateCustomerPreferencesSchema>;
+export type StaffApprovalRequest = z.infer<typeof staffApprovalSchema>;
+
+// Preference options for myFilter UI
+export const DIETARY_RESTRICTIONS = ["vegan", "vegetarian", "pescatarian", "halal", "kosher", "none"] as const;
+export const ALLERGENS = ["peanuts", "tree_nuts", "dairy", "eggs", "soy", "gluten", "shellfish", "fish", "sesame", "none"] as const;
+export const CUISINES = ["american", "italian", "mexican", "mediterranean", "asian", "indian", "middle_eastern", "latin", "african", "fusion"] as const;
+export const PROTEINS = ["beef", "poultry", "pork", "seafood", "plant_based", "eggs", "legumes"] as const;
+export const COOKING_METHODS = ["grilled", "roasted", "baked", "steamed", "fried", "raw", "sauteed", "smoked"] as const;
+export const MEAL_TYPES = ["breakfast", "brunch", "lunch", "dinner", "dessert", "snacks", "appetizers"] as const;
+export const BEVERAGES = ["water", "sparkling_water", "coffee", "tea", "juice", "smoothie", "soda", "mocktail", "cocktail", "beer", "wine", "spirits"] as const;

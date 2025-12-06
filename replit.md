@@ -118,10 +118,38 @@ Preferred communication style: Simple, everyday language.
 - Payment status visible to relevant staff roles
 
 **Role-Based Features:**
-- **Customer**: Browse menu, place orders, track order status, call waiter
+- **Customer**: Browse menu, place orders, track order status, call waiter, manage dietary preferences (myFilter), view nutritional summaries
 - **Kitchen Staff**: View orders by status, update preparation progress
 - **Waiter**: Deliver orders, process payments, respond to table calls
-- **Owner**: Full access to analytics plus waiter capabilities
+- **Owner**: Full access to analytics plus waiter capabilities, manage restaurant staff approvals
+
+## Recent Changes (December 2025)
+
+### Multi-Restaurant Management
+- Extended schema with `restaurants`, `staffRestaurantAssignments`, and `customerPreferences` tables
+- Owners can create restaurants and approve/revoke staff access
+- Staff can request to join restaurants (pending owner approval)
+
+### Customer Preferences (myFilter)
+- Comprehensive dietary preferences stored per customer
+- 15+ preference categories: dietary restrictions, allergens, cuisines, proteins, spice levels, cooking methods, meal types, beverage preferences, sustainability options, macros
+- Server-side menu filtering when myFilter toggle is active
+- Accessible from profile dropdown menu
+
+### Nutritional Tracking
+- Menu items extended with nutritional fields (calories, protein, carbs, fat)
+- Customer orders view shows daily and weekly nutritional summaries
+- Today's orders displayed first with past orders in collapsible section
+
+### New API Endpoints
+- `/api/restaurants` - Restaurant list and details
+- `/api/staff/owner-signup` - Owner registration with restaurant creation
+- `/api/staff/join-restaurant` - Staff requests to join restaurant
+- `/api/restaurants/:id/staff` - Get restaurant staff (owner only)
+- `/api/restaurants/:id/staff/approve` - Approve/revoke staff (owner only)
+- `/api/customer/preferences` - Get/update customer dietary preferences
+- `/api/customer/orders/nutrition` - Orders with nutrition aggregation
+- `/api/menu/filtered` - Menu with customer preference filtering
 
 ## External Dependencies
 

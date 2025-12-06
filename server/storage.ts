@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, desc, sql, and, ne } from "drizzle-orm";
+import { eq, desc, sql, and, ne, gte } from "drizzle-orm";
 import {
   staff,
   customers,
@@ -10,6 +10,9 @@ import {
   restaurantTables,
   categories,
   tableCalls,
+  restaurants,
+  customerPreferences,
+  staffRestaurantAssignments,
   type Staff,
   type InsertStaff,
   type Customer,
@@ -23,6 +26,12 @@ import {
   type Category,
   type TableCall,
   type InsertTableCall,
+  type Restaurant,
+  type InsertRestaurant,
+  type CustomerPreference,
+  type InsertCustomerPreference,
+  type StaffRestaurantAssignment,
+  type InsertStaffRestaurantAssignment,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -83,6 +92,27 @@ export interface IStorage {
   getTotalOrders(): Promise<number>;
   getTopSellingItems(limit: number): Promise<{ name: string; orders: number; revenue: number }[]>;
   getDailyRevenue(days: number): Promise<{ date: string; revenue: number; orders: number }[]>;
+
+  // Restaurants
+  getRestaurants(): Promise<Restaurant[]>;
+  getRestaurant(id: number): Promise<Restaurant | undefined>;
+  createRestaurant(data: InsertRestaurant): Promise<Restaurant>;
+  updateRestaurant(id: number, data: Partial<InsertRestaurant>): Promise<Restaurant | undefined>;
+
+  // Customer Preferences
+  getCustomerPreferences(customerId: number): Promise<CustomerPreference | undefined>;
+  upsertCustomerPreferences(customerId: number, data: Partial<InsertCustomerPreference>): Promise<CustomerPreference>;
+
+  // Staff Restaurant Assignments
+  getStaffAssignment(staffId: number, restaurantId: number): Promise<StaffRestaurantAssignment | undefined>;
+  getStaffAssignmentsByRestaurant(restaurantId: number): Promise<(StaffRestaurantAssignment & { staff: Staff })[]>;
+  getApprovedAssignmentForStaff(staffId: number): Promise<StaffRestaurantAssignment | undefined>;
+  createStaffAssignment(data: InsertStaffRestaurantAssignment): Promise<StaffRestaurantAssignment>;
+  approveStaffAssignment(assignmentId: number, approvedBy: number): Promise<StaffRestaurantAssignment | undefined>;
+  revokeStaffAssignment(assignmentId: number): Promise<StaffRestaurantAssignment | undefined>;
+
+  // Customer Orders with nutrition
+  getOrdersWithNutrition(customerId: number): Promise<(OrderTicket & { items: (OrderItem & { menuItem: MenuItem })[] })[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -320,6 +350,112 @@ export class DatabaseStorage implements IStorage {
       date: row.date,
       revenue: parseFloat(row.revenue),
       orders: parseInt(row.orders),
+    }));
+  }
+
+  // Restaurants
+  async getRestaurants(): Promise<Restaurant[]> {
+    return db.select().from(restaurants).where(eq(restaurants.isActive, true));
+  }
+
+  async getRestaurant(id: number): Promise<Restaurant | undefined> {
+    const [r] = await db.select().from(restaurants).where(eq(restaurants.id, id));
+    return r;
+  }
+
+  async createRestaurant(data: InsertRestaurant): Promise<Restaurant> {
+    const [created] = await db.insert(restaurants).values(data).returning();
+    return created;
+  }
+
+  async updateRestaurant(id: number, data: Partial<InsertRestaurant>): Promise<Restaurant | undefined> {
+    const [updated] = await db.update(restaurants).set(data).where(eq(restaurants.id, id)).returning();
+    return updated;
+  }
+
+  // Customer Preferences
+  async getCustomerPreferences(customerId: number): Promise<CustomerPreference | undefined> {
+    const [prefs] = await db.select().from(customerPreferences).where(eq(customerPreferences.customerId, customerId));
+    return prefs;
+  }
+
+  async upsertCustomerPreferences(customerId: number, data: Partial<InsertCustomerPreference>): Promise<CustomerPreference> {
+    const existing = await this.getCustomerPreferences(customerId);
+    if (existing) {
+      const [updated] = await db.update(customerPreferences)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(customerPreferences.customerId, customerId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(customerPreferences)
+        .values({ ...data, customerId })
+        .returning();
+      return created;
+    }
+  }
+
+  // Staff Restaurant Assignments
+  async getStaffAssignment(staffId: number, restaurantId: number): Promise<StaffRestaurantAssignment | undefined> {
+    const [assignment] = await db.select().from(staffRestaurantAssignments)
+      .where(and(
+        eq(staffRestaurantAssignments.staffId, staffId),
+        eq(staffRestaurantAssignments.restaurantId, restaurantId)
+      ));
+    return assignment;
+  }
+
+  async getStaffAssignmentsByRestaurant(restaurantId: number): Promise<(StaffRestaurantAssignment & { staff: Staff })[]> {
+    const assignments = await db.select().from(staffRestaurantAssignments)
+      .where(eq(staffRestaurantAssignments.restaurantId, restaurantId));
+    return Promise.all(assignments.map(async (assignment) => {
+      const [staffMember] = await db.select().from(staff).where(eq(staff.id, assignment.staffId));
+      return { ...assignment, staff: staffMember };
+    }));
+  }
+
+  async getApprovedAssignmentForStaff(staffId: number): Promise<StaffRestaurantAssignment | undefined> {
+    const [assignment] = await db.select().from(staffRestaurantAssignments)
+      .where(and(
+        eq(staffRestaurantAssignments.staffId, staffId),
+        eq(staffRestaurantAssignments.status, "approved")
+      ));
+    return assignment;
+  }
+
+  async createStaffAssignment(data: InsertStaffRestaurantAssignment): Promise<StaffRestaurantAssignment> {
+    const [created] = await db.insert(staffRestaurantAssignments).values(data).returning();
+    return created;
+  }
+
+  async approveStaffAssignment(assignmentId: number, approvedBy: number): Promise<StaffRestaurantAssignment | undefined> {
+    const [updated] = await db.update(staffRestaurantAssignments)
+      .set({ status: "approved", approvedAt: new Date(), approvedBy })
+      .where(eq(staffRestaurantAssignments.id, assignmentId))
+      .returning();
+    return updated;
+  }
+
+  async revokeStaffAssignment(assignmentId: number): Promise<StaffRestaurantAssignment | undefined> {
+    const [updated] = await db.update(staffRestaurantAssignments)
+      .set({ status: "revoked", revokedAt: new Date() })
+      .where(eq(staffRestaurantAssignments.id, assignmentId))
+      .returning();
+    return updated;
+  }
+
+  // Customer Orders with nutrition
+  async getOrdersWithNutrition(customerId: number): Promise<(OrderTicket & { items: (OrderItem & { menuItem: MenuItem })[] })[]> {
+    const orders = await db.select().from(orderTickets)
+      .where(eq(orderTickets.customerId, customerId))
+      .orderBy(desc(orderTickets.createdAt));
+    return Promise.all(orders.map(async (order) => {
+      const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+      const itemsWithMenuItems = await Promise.all(items.map(async (item) => {
+        const [menuItem] = await db.select().from(menuItems).where(eq(menuItems.id, item.menuItemId));
+        return { ...item, menuItem };
+      }));
+      return { ...order, items: itemsWithMenuItems };
     }));
   }
 }

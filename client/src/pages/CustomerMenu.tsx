@@ -11,17 +11,48 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Minus, Leaf, WheatOff, Flame, Loader2, Bell, Clock, Package, CheckCircle } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { Plus, Minus, Leaf, WheatOff, Flame, Loader2, Bell, Clock, Package, CheckCircle, ChevronDown, ChevronUp, Filter, X, User, Settings } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DIETARY_RESTRICTIONS,
+  ALLERGENS,
+  CUISINES,
+  PROTEINS,
+  COOKING_METHODS,
+  MEAL_TYPES,
+  BEVERAGES,
+} from "@shared/schema";
 
 interface MenuModifier {
   id: string;
@@ -41,17 +72,74 @@ interface MenuItem {
   isSpicy: boolean | null;
   allergens: string[] | null;
   modifiers: MenuModifier[];
+  calories?: number;
+  protein?: string;
+  carbs?: string;
+  fat?: string;
 }
 
-interface CustomerOrder {
+interface OrderItemWithNutrition {
+  id: string;
+  name: string;
+  quantity: number;
+  unitPrice: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
+interface CustomerOrderWithNutrition {
   id: string;
   orderNumber: string;
   tableNumber: number | null;
-  items: { id: string; name: string; quantity: number; unitPrice: string }[];
+  items: OrderItemWithNutrition[];
   status: "new" | "in_progress" | "ready" | "delivered";
   paymentStatus: string;
   totalAmount: string;
   createdAt: string;
+  isToday: boolean;
+  nutrition: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  };
+}
+
+interface OrdersWithNutritionResponse {
+  todayOrders: CustomerOrderWithNutrition[];
+  pastOrders: CustomerOrderWithNutrition[];
+  dailyNutrition: { calories: number; protein: number; carbs: number; fat: number };
+  weeklyNutrition: { calories: number; protein: number; carbs: number; fat: number };
+}
+
+interface CustomerPreferences {
+  dietaryRestrictions?: string[];
+  allergensToAvoid?: string[];
+  dislikedIngredients?: string[];
+  preferredCuisines?: string[];
+  preferredProteins?: string[];
+  spiceLevel?: string;
+  preferredCookingMethods?: string[];
+  mealTypes?: string[];
+  beveragePreferences?: string[];
+  alcoholPreference?: string;
+  caffeinePreference?: string;
+  sweetnessPreference?: string;
+  portionSize?: string;
+  calorieTargetMin?: number;
+  calorieTargetMax?: number;
+  priceSensitivity?: string;
+  preferOrganic?: boolean;
+  preferLocallySourced?: boolean;
+  avoidSpicy?: boolean;
+  avoidAlcohol?: boolean;
+  avoidCaffeine?: boolean;
+  lowSodium?: boolean;
+  lowSugar?: boolean;
+  highProtein?: boolean;
+  lowCarb?: boolean;
 }
 
 interface CustomerMenuProps {
@@ -60,14 +148,14 @@ interface CustomerMenuProps {
   onLogout: () => void;
 }
 
-const statusLabels: Record<CustomerOrder["status"], string> = {
+const statusLabels: Record<CustomerOrderWithNutrition["status"], string> = {
   new: "Order Received",
   in_progress: "Being Prepared",
   ready: "Ready for Pickup",
   delivered: "Delivered",
 };
 
-const statusIcons: Record<CustomerOrder["status"], typeof Clock> = {
+const statusIcons: Record<CustomerOrderWithNutrition["status"], typeof Clock> = {
   new: Clock,
   in_progress: Package,
   ready: Bell,
@@ -87,15 +175,43 @@ export default function CustomerMenu({
   const [quantity, setQuantity] = useState(1);
   const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<"menu" | "orders">("menu");
+  const [isPastOrdersOpen, setIsPastOrdersOpen] = useState(false);
+  const [isFilterApplied, setIsFilterApplied] = useState(false);
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [nutritionView, setNutritionView] = useState<"daily" | "weekly">("daily");
   const { toast } = useToast();
 
   const { data: menuItems = [], isLoading } = useQuery<MenuItem[]>({
-    queryKey: ["/api/menu"],
+    queryKey: ["/api/menu/filtered", isFilterApplied],
+    queryFn: async () => {
+      const url = isFilterApplied ? "/api/menu/filtered?applyFilter=true" : "/api/menu";
+      const res = await fetch(url);
+      return res.json();
+    },
   });
 
-  const { data: customerOrders = [], isLoading: isLoadingOrders } = useQuery<CustomerOrder[]>({
-    queryKey: ["/api/customer/orders"],
+  const { data: ordersData, isLoading: isLoadingOrders } = useQuery<OrdersWithNutritionResponse>({
+    queryKey: ["/api/customer/orders/nutrition"],
     refetchInterval: 5000,
+  });
+
+  const { data: preferences = {} as CustomerPreferences } = useQuery<CustomerPreferences>({
+    queryKey: ["/api/customer/preferences"],
+  });
+
+  const updatePreferencesMutation = useMutation({
+    mutationFn: async (data: CustomerPreferences) => {
+      const res = await apiRequest("PUT", "/api/customer/preferences", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Preferences Saved", description: "Your dietary preferences have been updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/customer/preferences"] });
+      setIsPreferencesOpen(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
   });
 
   const createOrderMutation = useMutation({
@@ -108,7 +224,7 @@ export default function CustomerMenu({
       setCartItems([]);
       setActiveTab("orders");
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/customer/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/customer/orders/nutrition"] });
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -213,6 +329,11 @@ export default function CustomerMenu({
     return total;
   };
 
+  const handleToggleFilter = () => {
+    setIsFilterApplied(!isFilterApplied);
+    queryClient.invalidateQueries({ queryKey: ["/api/menu/filtered", !isFilterApplied] });
+  };
+
   const cartTotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const cartItemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -228,7 +349,7 @@ export default function CustomerMenu({
     callWaiterMutation.mutate();
   };
 
-  const getStatusColor = (status: CustomerOrder["status"]) => {
+  const getStatusColor = (status: CustomerOrderWithNutrition["status"]) => {
     switch (status) {
       case "new": return "border-l-blue-500";
       case "in_progress": return "border-l-amber-500";
@@ -237,34 +358,99 @@ export default function CustomerMenu({
     }
   };
 
+  const todayOrders = ordersData?.todayOrders || [];
+  const pastOrders = ordersData?.pastOrders || [];
+  const dailyNutrition = ordersData?.dailyNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+  const weeklyNutrition = ordersData?.weeklyNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+
+  const hasPreferences = preferences && Object.keys(preferences).some(
+    (key) => {
+      const value = preferences[key as keyof CustomerPreferences];
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === "boolean") return value;
+      return !!value;
+    }
+  );
+
   return (
     <div className="min-h-screen bg-background pb-24">
-      <CustomerHeader tableNumber={tableNumber} userName={userName} onLogout={onLogout} />
+      <div className="sticky top-0 z-50 bg-background border-b">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-lg">MyDine</span>
+            <Badge variant="outline">Table {tableNumber}</Badge>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" data-testid="button-profile">
+                <User className="w-5 h-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <div className="px-2 py-1.5">
+                <p className="font-medium">{userName}</p>
+                <p className="text-xs text-muted-foreground">Table {tableNumber}</p>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setIsPreferencesOpen(true)} data-testid="button-my-filter">
+                <Settings className="w-4 h-4 mr-2" />
+                myFilter Preferences
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onLogout} data-testid="button-logout">
+                Sign Out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
 
       <div className="px-4 py-4 space-y-4">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "menu" | "orders")} className="flex-1">
             <TabsList>
               <TabsTrigger value="menu" data-testid="tab-menu">Menu</TabsTrigger>
               <TabsTrigger value="orders" data-testid="tab-orders" className="relative">
                 My Orders
-                {customerOrders.filter(o => o.status !== "delivered").length > 0 && (
+                {todayOrders.filter(o => o.status !== "delivered").length > 0 && (
                   <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                    {customerOrders.filter(o => o.status !== "delivered").length}
+                    {todayOrders.filter(o => o.status !== "delivered").length}
                   </span>
                 )}
               </TabsTrigger>
             </TabsList>
           </Tabs>
-          <Button
-            variant="outline"
-            onClick={handleCallWaiter}
-            disabled={callWaiterMutation.isPending}
-            data-testid="button-call-waiter"
-          >
-            <Bell className="w-4 h-4 mr-2" />
-            Call Waiter
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant={isFilterApplied ? "default" : "outline"}
+              onClick={handleToggleFilter}
+              disabled={!hasPreferences}
+              data-testid="button-apply-filter"
+              size="sm"
+            >
+              {isFilterApplied ? (
+                <>
+                  <X className="w-4 h-4 mr-1" />
+                  Clear myFilter
+                </>
+              ) : (
+                <>
+                  <Filter className="w-4 h-4 mr-1" />
+                  Apply myFilter
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleCallWaiter}
+              disabled={callWaiterMutation.isPending}
+              data-testid="button-call-waiter"
+              size="sm"
+            >
+              <Bell className="w-4 h-4 mr-1" />
+              Call Waiter
+            </Button>
+          </div>
         </div>
 
         {activeTab === "menu" && (
@@ -289,6 +475,9 @@ export default function CustomerMenu({
                       <span className="font-bold text-base">${parseFloat(item.price).toFixed(2)}</span>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{item.description}</p>
+                    {item.calories && (
+                      <p className="text-xs text-muted-foreground mt-1">{item.calories} cal</p>
+                    )}
                     <div className="flex gap-1 mt-2 flex-wrap">
                       {item.isVegan && (
                         <Badge variant="secondary" className="text-xs">
@@ -314,60 +503,149 @@ export default function CustomerMenu({
             {filteredItems.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
                 <p>No items match your filters</p>
+                {isFilterApplied && (
+                  <Button variant="link" onClick={() => setIsFilterApplied(false)}>
+                    Clear myFilter
+                  </Button>
+                )}
               </div>
             )}
           </>
         )}
 
         {activeTab === "orders" && (
-          <div className="space-y-4">
+          <div className="space-y-6">
             {isLoadingOrders ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
               </div>
-            ) : customerOrders.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>You haven't placed any orders yet</p>
-                <Button variant="outline" className="mt-4" onClick={() => setActiveTab("menu")}>
-                  Browse Menu
-                </Button>
-              </div>
             ) : (
-              <div className="space-y-4">
-                {customerOrders.map((order) => {
-                  const StatusIcon = statusIcons[order.status];
-                  return (
-                    <Card key={order.id} className={`p-4 border-l-4 ${getStatusColor(order.status)}`} data-testid={`card-order-${order.id}`}>
-                      <div className="flex items-start justify-between gap-2 flex-wrap mb-3">
-                        <div>
-                          <h3 className="font-bold text-lg">Order #{order.orderNumber}</h3>
-                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                            <Clock className="w-3 h-3" />
-                            <span>{new Date(order.createdAt).toLocaleTimeString()}</span>
-                          </div>
-                        </div>
-                        <Badge variant={order.status === "delivered" ? "outline" : "default"}>
-                          <StatusIcon className="w-3 h-3 mr-1" />
-                          {statusLabels[order.status]}
-                        </Badge>
-                      </div>
-                      <div className="space-y-1 mb-3">
-                        {order.items.map((item) => (
-                          <div key={item.id} className="flex justify-between text-sm">
-                            <span>{item.quantity}x {item.name}</span>
-                            <span className="text-muted-foreground">${(parseFloat(item.unitPrice) * item.quantity).toFixed(2)}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex justify-between items-center pt-2 border-t">
-                        <span className="font-semibold">Total</span>
-                        <span className="font-bold">${parseFloat(order.totalAmount).toFixed(2)}</span>
-                      </div>
+              <>
+                <div className="space-y-4">
+                  <h2 className="font-semibold text-lg">Today's Orders</h2>
+                  {todayOrders.length === 0 ? (
+                    <Card className="p-4 text-center text-muted-foreground">
+                      <p>No orders today yet</p>
                     </Card>
-                  );
-                })}
-              </div>
+                  ) : (
+                    todayOrders.map((order) => {
+                      const StatusIcon = statusIcons[order.status];
+                      return (
+                        <Card key={order.id} className={`p-4 border-l-4 ${getStatusColor(order.status)}`} data-testid={`card-order-${order.id}`}>
+                          <div className="flex items-start justify-between gap-2 flex-wrap mb-3">
+                            <div>
+                              <h3 className="font-bold text-lg">Order #{order.orderNumber}</h3>
+                              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                <Clock className="w-3 h-3" />
+                                <span>{new Date(order.createdAt).toLocaleTimeString()}</span>
+                              </div>
+                            </div>
+                            <Badge variant={order.status === "delivered" ? "outline" : "default"}>
+                              <StatusIcon className="w-3 h-3 mr-1" />
+                              {statusLabels[order.status]}
+                            </Badge>
+                          </div>
+                          <div className="space-y-1 mb-3">
+                            {order.items.map((item) => (
+                              <div key={item.id} className="flex justify-between text-sm">
+                                <span>{item.quantity}x {item.name}</span>
+                                <span className="text-muted-foreground">${(parseFloat(item.unitPrice) * item.quantity).toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex justify-between items-center pt-2 border-t">
+                            <span className="font-semibold">Total</span>
+                            <span className="font-bold">${parseFloat(order.totalAmount).toFixed(2)}</span>
+                          </div>
+                        </Card>
+                      );
+                    })
+                  )}
+                </div>
+
+                {pastOrders.length > 0 && (
+                  <Collapsible open={isPastOrdersOpen} onOpenChange={setIsPastOrdersOpen}>
+                    <CollapsibleTrigger asChild>
+                      <Button variant="outline" className="w-full" data-testid="button-past-orders">
+                        {isPastOrdersOpen ? <ChevronUp className="w-4 h-4 mr-2" /> : <ChevronDown className="w-4 h-4 mr-2" />}
+                        View Past Orders ({pastOrders.length})
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="space-y-4 mt-4">
+                      {pastOrders.map((order) => {
+                        const StatusIcon = statusIcons[order.status];
+                        return (
+                          <Card key={order.id} className={`p-4 border-l-4 ${getStatusColor(order.status)} opacity-75`} data-testid={`card-past-order-${order.id}`}>
+                            <div className="flex items-start justify-between gap-2 flex-wrap mb-3">
+                              <div>
+                                <h3 className="font-bold">Order #{order.orderNumber}</h3>
+                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{new Date(order.createdAt).toLocaleDateString()}</span>
+                                </div>
+                              </div>
+                              <Badge variant="outline">
+                                <StatusIcon className="w-3 h-3 mr-1" />
+                                {statusLabels[order.status]}
+                              </Badge>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-muted-foreground">{order.items.length} items</span>
+                              <span className="font-semibold">${parseFloat(order.totalAmount).toFixed(2)}</span>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </CollapsibleContent>
+                  </Collapsible>
+                )}
+
+                <Separator />
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-semibold text-lg">Nutritional Summary</h2>
+                    <div className="flex gap-1">
+                      <Button
+                        variant={nutritionView === "daily" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setNutritionView("daily")}
+                        data-testid="button-daily-nutrition"
+                      >
+                        Daily
+                      </Button>
+                      <Button
+                        variant={nutritionView === "weekly" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setNutritionView("weekly")}
+                        data-testid="button-weekly-nutrition"
+                      >
+                        Weekly
+                      </Button>
+                    </div>
+                  </div>
+                  <Card className="p-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+                      <div>
+                        <p className="text-2xl font-bold">{nutritionView === "daily" ? dailyNutrition.calories : weeklyNutrition.calories}</p>
+                        <p className="text-sm text-muted-foreground">Calories</p>
+                      </div>
+                      <div>
+                        <p className="text-2xl font-bold">{(nutritionView === "daily" ? dailyNutrition.protein : weeklyNutrition.protein).toFixed(1)}g</p>
+                        <p className="text-sm text-muted-foreground">Protein</p>
+                      </div>
+                      <div>
+                        <p className="text-2xl font-bold">{(nutritionView === "daily" ? dailyNutrition.carbs : weeklyNutrition.carbs).toFixed(1)}g</p>
+                        <p className="text-sm text-muted-foreground">Carbs</p>
+                      </div>
+                      <div>
+                        <p className="text-2xl font-bold">{(nutritionView === "daily" ? dailyNutrition.fat : weeklyNutrition.fat).toFixed(1)}g</p>
+                        <p className="text-sm text-muted-foreground">Fat</p>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -397,6 +675,14 @@ export default function CustomerMenu({
                   <img src={selectedItem.image} alt={selectedItem.name} className="w-full h-full object-cover" />
                 </div>
                 <p className="text-muted-foreground">{selectedItem.description}</p>
+                {selectedItem.calories && (
+                  <div className="flex gap-4 text-sm">
+                    <span>{selectedItem.calories} cal</span>
+                    {selectedItem.protein && <span>{selectedItem.protein}g protein</span>}
+                    {selectedItem.carbs && <span>{selectedItem.carbs}g carbs</span>}
+                    {selectedItem.fat && <span>{selectedItem.fat}g fat</span>}
+                  </div>
+                )}
                 {selectedItem.allergens && selectedItem.allergens.length > 0 && (
                   <div className="text-sm">
                     <span className="font-medium">Allergens: </span>
@@ -440,6 +726,276 @@ export default function CustomerMenu({
           )}
         </DialogContent>
       </Dialog>
+
+      <PreferencesDialog
+        open={isPreferencesOpen}
+        onOpenChange={setIsPreferencesOpen}
+        preferences={preferences}
+        onSave={(prefs) => updatePreferencesMutation.mutate(prefs)}
+        isSaving={updatePreferencesMutation.isPending}
+      />
     </div>
+  );
+}
+
+interface PreferencesDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  preferences: CustomerPreferences;
+  onSave: (prefs: CustomerPreferences) => void;
+  isSaving: boolean;
+}
+
+function PreferencesDialog({ open, onOpenChange, preferences, onSave, isSaving }: PreferencesDialogProps) {
+  const [localPrefs, setLocalPrefs] = useState<CustomerPreferences>(preferences);
+
+  const toggleArrayItem = (key: keyof CustomerPreferences, item: string) => {
+    const currentArray = (localPrefs[key] as string[]) || [];
+    const newArray = currentArray.includes(item)
+      ? currentArray.filter((i) => i !== item)
+      : [...currentArray, item];
+    setLocalPrefs({ ...localPrefs, [key]: newArray });
+  };
+
+  const toggleBoolean = (key: keyof CustomerPreferences) => {
+    setLocalPrefs({ ...localPrefs, [key]: !localPrefs[key] });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[80vh]">
+        <DialogHeader>
+          <DialogTitle>myFilter Preferences</DialogTitle>
+          <DialogDescription>
+            Set your dietary preferences and restrictions. These will be applied when you use the "Apply myFilter" button.
+          </DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="h-[60vh] pr-4">
+          <div className="space-y-6">
+            <div>
+              <h3 className="font-semibold mb-3">Dietary Restrictions</h3>
+              <div className="flex flex-wrap gap-2">
+                {DIETARY_RESTRICTIONS.filter(d => d !== "none").map((diet) => (
+                  <Badge
+                    key={diet}
+                    variant={localPrefs.dietaryRestrictions?.includes(diet) ? "default" : "outline"}
+                    className="cursor-pointer capitalize"
+                    onClick={() => toggleArrayItem("dietaryRestrictions", diet)}
+                  >
+                    {diet.replace("_", " ")}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold mb-3">Allergens to Avoid</h3>
+              <div className="flex flex-wrap gap-2">
+                {ALLERGENS.filter(a => a !== "none").map((allergen) => (
+                  <Badge
+                    key={allergen}
+                    variant={localPrefs.allergensToAvoid?.includes(allergen) ? "destructive" : "outline"}
+                    className="cursor-pointer capitalize"
+                    onClick={() => toggleArrayItem("allergensToAvoid", allergen)}
+                  >
+                    {allergen.replace("_", " ")}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold mb-3">Preferred Cuisines</h3>
+              <div className="flex flex-wrap gap-2">
+                {CUISINES.map((cuisine) => (
+                  <Badge
+                    key={cuisine}
+                    variant={localPrefs.preferredCuisines?.includes(cuisine) ? "default" : "outline"}
+                    className="cursor-pointer capitalize"
+                    onClick={() => toggleArrayItem("preferredCuisines", cuisine)}
+                  >
+                    {cuisine.replace("_", " ")}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold mb-3">Preferred Proteins</h3>
+              <div className="flex flex-wrap gap-2">
+                {PROTEINS.map((protein) => (
+                  <Badge
+                    key={protein}
+                    variant={localPrefs.preferredProteins?.includes(protein) ? "default" : "outline"}
+                    className="cursor-pointer capitalize"
+                    onClick={() => toggleArrayItem("preferredProteins", protein)}
+                  >
+                    {protein.replace("_", " ")}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold mb-3">Cooking Methods</h3>
+              <div className="flex flex-wrap gap-2">
+                {COOKING_METHODS.map((method) => (
+                  <Badge
+                    key={method}
+                    variant={localPrefs.preferredCookingMethods?.includes(method) ? "default" : "outline"}
+                    className="cursor-pointer capitalize"
+                    onClick={() => toggleArrayItem("preferredCookingMethods", method)}
+                  >
+                    {method.replace("_", " ")}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold mb-3">Meal Types</h3>
+              <div className="flex flex-wrap gap-2">
+                {MEAL_TYPES.map((meal) => (
+                  <Badge
+                    key={meal}
+                    variant={localPrefs.mealTypes?.includes(meal) ? "default" : "outline"}
+                    className="cursor-pointer capitalize"
+                    onClick={() => toggleArrayItem("mealTypes", meal)}
+                  >
+                    {meal.replace("_", " ")}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold mb-3">Beverage Preferences</h3>
+              <div className="flex flex-wrap gap-2">
+                {BEVERAGES.map((beverage) => (
+                  <Badge
+                    key={beverage}
+                    variant={localPrefs.beveragePreferences?.includes(beverage) ? "default" : "outline"}
+                    className="cursor-pointer capitalize"
+                    onClick={() => toggleArrayItem("beveragePreferences", beverage)}
+                  >
+                    {beverage.replace("_", " ")}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            <div>
+              <h3 className="font-semibold mb-3">Spice Tolerance</h3>
+              <Select
+                value={localPrefs.spiceLevel || ""}
+                onValueChange={(v) => setLocalPrefs({ ...localPrefs, spiceLevel: v })}
+              >
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="Select spice level" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No spice</SelectItem>
+                  <SelectItem value="mild">Mild</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="hot">Hot</SelectItem>
+                  <SelectItem value="extra_hot">Extra Hot</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Separator />
+
+            <div>
+              <h3 className="font-semibold mb-3">Additional Preferences</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="avoidSpicy"
+                    checked={localPrefs.avoidSpicy || false}
+                    onCheckedChange={() => toggleBoolean("avoidSpicy")}
+                  />
+                  <Label htmlFor="avoidSpicy">Avoid Spicy Food</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="avoidAlcohol"
+                    checked={localPrefs.avoidAlcohol || false}
+                    onCheckedChange={() => toggleBoolean("avoidAlcohol")}
+                  />
+                  <Label htmlFor="avoidAlcohol">Avoid Alcohol</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="avoidCaffeine"
+                    checked={localPrefs.avoidCaffeine || false}
+                    onCheckedChange={() => toggleBoolean("avoidCaffeine")}
+                  />
+                  <Label htmlFor="avoidCaffeine">Avoid Caffeine</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="lowSodium"
+                    checked={localPrefs.lowSodium || false}
+                    onCheckedChange={() => toggleBoolean("lowSodium")}
+                  />
+                  <Label htmlFor="lowSodium">Low Sodium</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="lowSugar"
+                    checked={localPrefs.lowSugar || false}
+                    onCheckedChange={() => toggleBoolean("lowSugar")}
+                  />
+                  <Label htmlFor="lowSugar">Low Sugar</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="highProtein"
+                    checked={localPrefs.highProtein || false}
+                    onCheckedChange={() => toggleBoolean("highProtein")}
+                  />
+                  <Label htmlFor="highProtein">High Protein</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="lowCarb"
+                    checked={localPrefs.lowCarb || false}
+                    onCheckedChange={() => toggleBoolean("lowCarb")}
+                  />
+                  <Label htmlFor="lowCarb">Low Carb</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="preferOrganic"
+                    checked={localPrefs.preferOrganic || false}
+                    onCheckedChange={() => toggleBoolean("preferOrganic")}
+                  />
+                  <Label htmlFor="preferOrganic">Prefer Organic</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="preferLocallySourced"
+                    checked={localPrefs.preferLocallySourced || false}
+                    onCheckedChange={() => toggleBoolean("preferLocallySourced")}
+                  />
+                  <Label htmlFor="preferLocallySourced">Prefer Locally Sourced</Label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </ScrollArea>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={() => onSave(localPrefs)} disabled={isSaving}>
+            {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            Save Preferences
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

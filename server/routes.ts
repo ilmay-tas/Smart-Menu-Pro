@@ -13,6 +13,10 @@ import {
   updateOrderStatusSchema,
   updatePaymentStatusSchema,
   createTableCallSchema,
+  ownerStaffSignUpSchema,
+  staffJoinRestaurantSchema,
+  updateCustomerPreferencesSchema,
+  staffApprovalSchema,
 } from "@shared/schema";
 
 declare module "express-session" {
@@ -538,6 +542,410 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       const days = parseInt(req.query.days as string) || 7;
       const data = await storage.getDailyRevenue(days);
       res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============ RESTAURANTS ============
+  app.get("/api/restaurants", async (req, res) => {
+    try {
+      const restaurants = await storage.getRestaurants();
+      res.json(restaurants);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/restaurants/:id", async (req, res) => {
+    try {
+      const restaurant = await storage.getRestaurant(parseInt(req.params.id));
+      if (!restaurant) {
+        return res.status(404).json({ error: "Restaurant not found" });
+      }
+      res.json(restaurant);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============ OWNER SIGNUP (creates restaurant) ============
+  app.post("/api/staff/owner-signup", async (req, res) => {
+    try {
+      const data = ownerStaffSignUpSchema.parse(req.body);
+      
+      const existing = await storage.getStaffByUsername(data.username);
+      if (existing) {
+        return res.status(400).json({ error: "Username already taken" });
+      }
+
+      const hashedPassword = await hashPassword(data.password);
+      
+      // Create the staff member as owner
+      const staffMember = await storage.createStaff({
+        username: data.username,
+        passwordHash: hashedPassword,
+        name: data.name,
+        role: "owner",
+      });
+
+      // Create the restaurant with this owner
+      const restaurant = await storage.createRestaurant({
+        name: data.restaurant.name,
+        address: data.restaurant.address,
+        phone: data.restaurant.phone,
+        email: data.restaurant.email,
+        description: data.restaurant.description,
+        logoUrl: data.restaurant.logoUrl,
+        ownerId: staffMember.id,
+      });
+
+      // Auto-approve owner's assignment to their restaurant
+      const assignment = await storage.createStaffAssignment({
+        staffId: staffMember.id,
+        restaurantId: restaurant.id,
+        status: "approved",
+      });
+
+      req.session.staffId = staffMember.id;
+      req.session.staffRole = staffMember.role;
+      req.session.userType = "staff";
+
+      res.json({ 
+        user: { id: staffMember.id, name: staffMember.name, username: staffMember.username, role: staffMember.role, type: "staff" },
+        restaurant,
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Invalid request" });
+    }
+  });
+
+  // ============ STAFF JOIN RESTAURANT ============
+  app.post("/api/staff/join-restaurant", async (req, res) => {
+    try {
+      const data = staffJoinRestaurantSchema.parse(req.body);
+      
+      const existing = await storage.getStaffByUsername(data.username);
+      if (existing) {
+        return res.status(400).json({ error: "Username already taken" });
+      }
+
+      // Check restaurant exists
+      const restaurant = await storage.getRestaurant(data.restaurantId);
+      if (!restaurant) {
+        return res.status(404).json({ error: "Restaurant not found" });
+      }
+
+      const hashedPassword = await hashPassword(data.password);
+      
+      // Create the staff member
+      const staffMember = await storage.createStaff({
+        username: data.username,
+        passwordHash: hashedPassword,
+        name: data.name,
+        role: data.role,
+      });
+
+      // Create pending assignment
+      await storage.createStaffAssignment({
+        staffId: staffMember.id,
+        restaurantId: data.restaurantId,
+        status: "pending",
+      });
+
+      res.json({ 
+        message: "Account created. Waiting for restaurant owner approval.",
+        pendingApproval: true,
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Invalid request" });
+    }
+  });
+
+  // ============ OWNER: STAFF MANAGEMENT ============
+  app.get("/api/restaurants/:id/staff", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+
+      const restaurantId = parseInt(req.params.id);
+      const restaurant = await storage.getRestaurant(restaurantId);
+      
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+
+      const assignments = await storage.getStaffAssignmentsByRestaurant(restaurantId);
+      res.json(assignments);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/restaurants/:id/staff/approve", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+
+      const data = staffApprovalSchema.parse(req.body);
+      const restaurantId = parseInt(req.params.id);
+      const restaurant = await storage.getRestaurant(restaurantId);
+      
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+
+      const assignment = await storage.getStaffAssignment(data.staffId, restaurantId);
+      if (!assignment) {
+        return res.status(404).json({ error: "Staff assignment not found" });
+      }
+
+      if (data.action === "approve") {
+        const updated = await storage.approveStaffAssignment(assignment.id, req.session.staffId);
+        res.json({ message: "Staff approved", assignment: updated });
+      } else if (data.action === "revoke") {
+        const updated = await storage.revokeStaffAssignment(assignment.id);
+        res.json({ message: "Staff access revoked", assignment: updated });
+      }
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // ============ CUSTOMER PREFERENCES ============
+  app.get("/api/customer/preferences", async (req, res) => {
+    try {
+      if (req.session.userType !== "customer" || !req.session.customerId) {
+        return res.status(401).json({ error: "Customer authentication required" });
+      }
+
+      const prefs = await storage.getCustomerPreferences(req.session.customerId);
+      res.json(prefs || {});
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/customer/preferences", async (req, res) => {
+    try {
+      if (req.session.userType !== "customer" || !req.session.customerId) {
+        return res.status(401).json({ error: "Customer authentication required" });
+      }
+
+      const data = updateCustomerPreferencesSchema.parse(req.body);
+      const prefs = await storage.upsertCustomerPreferences(req.session.customerId, data);
+      res.json(prefs);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // ============ CUSTOMER ORDERS WITH NUTRITION ============
+  app.get("/api/customer/orders/nutrition", async (req, res) => {
+    try {
+      if (req.session.userType !== "customer" || !req.session.customerId) {
+        return res.status(401).json({ error: "Customer authentication required" });
+      }
+
+      const orders = await storage.getOrdersWithNutrition(req.session.customerId);
+      const tables = await storage.getTables();
+      const tableMap = Object.fromEntries(tables.map((t) => [t.id, t.tableNumber]));
+      
+      // Get today's date at midnight for comparison
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const transformedOrders = orders.map((order) => {
+        const orderDate = order.createdAt ? new Date(order.createdAt) : new Date();
+        orderDate.setHours(0, 0, 0, 0);
+        const isToday = orderDate.getTime() === today.getTime();
+
+        // Calculate nutrition totals for the order
+        let totalCalories = 0;
+        let totalProtein = 0;
+        let totalCarbs = 0;
+        let totalFat = 0;
+
+        const itemsWithNutrition = order.items.map((item) => {
+          const menuItem = item.menuItem;
+          const calories = (menuItem?.calories || 0) * item.quantity;
+          const protein = parseFloat(String(menuItem?.proteinGrams || 0)) * item.quantity;
+          const carbs = parseFloat(String(menuItem?.carbsGrams || 0)) * item.quantity;
+          const fat = parseFloat(String(menuItem?.fatGrams || 0)) * item.quantity;
+
+          totalCalories += calories;
+          totalProtein += protein;
+          totalCarbs += carbs;
+          totalFat += fat;
+
+          return {
+            id: String(item.id),
+            name: menuItem?.name || "Unknown Item",
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            calories,
+            protein,
+            carbs,
+            fat,
+          };
+        });
+
+        return {
+          id: String(order.id),
+          orderNumber: order.orderNumber,
+          tableNumber: order.tableId ? tableMap[order.tableId] || null : null,
+          items: itemsWithNutrition,
+          status: order.status,
+          paymentStatus: order.paymentStatus,
+          totalAmount: order.totalAmount,
+          createdAt: order.createdAt?.toISOString() || new Date().toISOString(),
+          isToday,
+          nutrition: {
+            calories: totalCalories,
+            protein: totalProtein,
+            carbs: totalCarbs,
+            fat: totalFat,
+          },
+        };
+      });
+
+      // Separate today's orders from past orders
+      const todayOrders = transformedOrders.filter((o) => o.isToday);
+      const pastOrders = transformedOrders.filter((o) => !o.isToday);
+
+      // Calculate daily and weekly totals
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      weekAgo.setHours(0, 0, 0, 0);
+
+      const weeklyOrders = transformedOrders.filter((o) => {
+        const orderDate = new Date(o.createdAt);
+        return orderDate >= weekAgo;
+      });
+
+      const dailyNutrition = todayOrders.reduce(
+        (acc, order) => ({
+          calories: acc.calories + order.nutrition.calories,
+          protein: acc.protein + order.nutrition.protein,
+          carbs: acc.carbs + order.nutrition.carbs,
+          fat: acc.fat + order.nutrition.fat,
+        }),
+        { calories: 0, protein: 0, carbs: 0, fat: 0 }
+      );
+
+      const weeklyNutrition = weeklyOrders.reduce(
+        (acc, order) => ({
+          calories: acc.calories + order.nutrition.calories,
+          protein: acc.protein + order.nutrition.protein,
+          carbs: acc.carbs + order.nutrition.carbs,
+          fat: acc.fat + order.nutrition.fat,
+        }),
+        { calories: 0, protein: 0, carbs: 0, fat: 0 }
+      );
+
+      res.json({
+        todayOrders,
+        pastOrders,
+        dailyNutrition,
+        weeklyNutrition,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============ MENU WITH FILTER ============
+  app.get("/api/menu/filtered", async (req, res) => {
+    try {
+      const items = await storage.getMenuItems();
+      const cats = await storage.getCategories();
+      const categoryMap = Object.fromEntries(cats.map((c) => [c.id, c.name]));
+
+      let filteredItems = items;
+
+      // Apply customer preferences if authenticated and requested
+      if (req.session.userType === "customer" && req.session.customerId && req.query.applyFilter === "true") {
+        const prefs = await storage.getCustomerPreferences(req.session.customerId);
+        
+        if (prefs) {
+          filteredItems = items.filter((item) => {
+            // Dietary restrictions
+            if (prefs.dietaryRestrictions?.includes("vegan") && !item.isVegan) return false;
+            if (prefs.dietaryRestrictions?.includes("vegetarian") && !item.isVegetarian && !item.isVegan) return false;
+            if (prefs.dietaryRestrictions?.includes("halal") && !item.isHalal) return false;
+            if (prefs.dietaryRestrictions?.includes("kosher") && !item.isKosher) return false;
+
+            // Allergen avoidance
+            if (prefs.allergensToAvoid?.length) {
+              const itemAllergens = item.allergens || [];
+              for (const allergen of prefs.allergensToAvoid) {
+                if (itemAllergens.includes(allergen)) return false;
+              }
+            }
+
+            // Gluten-free
+            if (prefs.dietaryRestrictions?.includes("gluten_free") && !item.isGlutenFree) return false;
+
+            // Avoid spicy
+            if (prefs.avoidSpicy && item.isSpicy) return false;
+
+            // Avoid alcohol
+            if (prefs.avoidAlcohol && item.isAlcoholic) return false;
+
+            // Avoid caffeine
+            if (prefs.avoidCaffeine && item.isCaffeinated) return false;
+
+            // Calorie limits
+            if (prefs.calorieTargetMax && item.calories && item.calories > prefs.calorieTargetMax) return false;
+
+            return true;
+          });
+        }
+      }
+
+      const itemsWithDetails = await Promise.all(
+        filteredItems.map(async (item) => {
+          const mods = await storage.getModifiersForItem(item.id);
+          return {
+            id: String(item.id),
+            name: item.name,
+            description: item.description || "",
+            price: item.price,
+            image: item.imageUrl || "/menu/default.png",
+            category: item.categoryId ? categoryMap[item.categoryId] || "Other" : "Other",
+            isVegan: item.isVegan,
+            isVegetarian: item.isVegetarian,
+            isGlutenFree: item.isGlutenFree,
+            isDairyFree: item.isDairyFree,
+            isNutFree: item.isNutFree,
+            isHalal: item.isHalal,
+            isKosher: item.isKosher,
+            isSpicy: item.isSpicy,
+            spiceLevel: item.spiceLevel,
+            allergens: item.allergens,
+            cuisineType: item.cuisineType,
+            proteinType: item.proteinType,
+            cookingMethod: item.cookingMethod,
+            mealType: item.mealType,
+            isAlcoholic: item.isAlcoholic,
+            isCaffeinated: item.isCaffeinated,
+            isOrganic: item.isOrganic,
+            isLocallySourced: item.isLocallySourced,
+            calories: item.calories,
+            protein: item.proteinGrams,
+            carbs: item.carbsGrams,
+            fat: item.fatGrams,
+            modifiers: mods.map((m) => ({
+              id: String(m.id),
+              name: m.name,
+              price: m.additionalCost,
+            })),
+          };
+        })
+      );
+      res.json(itemsWithDetails);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
