@@ -1,230 +1,257 @@
 import { db } from "./db";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import {
-  users,
+  staff,
+  customers,
   menuItems,
-  menuModifiers,
-  orders,
+  modifiers,
+  orderTickets,
   orderItems,
-  tables,
-  type User,
-  type InsertUser,
+  restaurantTables,
+  categories,
+  type Staff,
+  type InsertStaff,
+  type Customer,
+  type InsertCustomer,
   type MenuItem,
   type InsertMenuItem,
-  type MenuModifier,
-  type InsertMenuModifier,
-  type Order,
-  type InsertOrder,
+  type Modifier,
+  type OrderTicket,
   type OrderItem,
-  type InsertOrderItem,
-  type Table,
-  type InsertTable,
+  type RestaurantTable,
+  type Category,
 } from "@shared/schema";
 
 export interface IStorage {
-  // Users
-  getUser(id: string): Promise<User | undefined>;
-  getUserByPhone(phone: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  // Staff
+  getStaff(id: number): Promise<Staff | undefined>;
+  getStaffByUsername(username: string): Promise<Staff | undefined>;
+  createStaff(data: InsertStaff): Promise<Staff>;
+
+  // Customers
+  getCustomer(id: number): Promise<Customer | undefined>;
+  getCustomerByPhone(phone: string): Promise<Customer | undefined>;
+  createCustomer(data: InsertCustomer): Promise<Customer>;
 
   // Menu Items
   getMenuItems(): Promise<MenuItem[]>;
-  getMenuItem(id: string): Promise<MenuItem | undefined>;
+  getMenuItem(id: number): Promise<MenuItem | undefined>;
   createMenuItem(item: InsertMenuItem): Promise<MenuItem>;
-  updateMenuItem(id: string, item: Partial<InsertMenuItem>): Promise<MenuItem | undefined>;
-  deleteMenuItem(id: string): Promise<boolean>;
 
-  // Menu Modifiers
-  getModifiersForItem(menuItemId: string): Promise<MenuModifier[]>;
-  createModifier(modifier: InsertMenuModifier): Promise<MenuModifier>;
+  // Modifiers
+  getModifiersForItem(menuItemId: number): Promise<Modifier[]>;
+  createModifier(data: { name: string; additionalCost: string; menuItemId: number }): Promise<Modifier>;
+
+  // Categories
+  getCategories(): Promise<Category[]>;
+  createCategory(name: string): Promise<Category>;
 
   // Tables
-  getTables(): Promise<Table[]>;
-  getTable(tableNumber: string): Promise<Table | undefined>;
-  createTable(table: InsertTable): Promise<Table>;
-  updateTableOccupancy(tableNumber: string, isOccupied: boolean): Promise<void>;
+  getTables(): Promise<RestaurantTable[]>;
+  getTableByNumber(tableNumber: number): Promise<RestaurantTable | undefined>;
+  createTable(tableNumber: number): Promise<RestaurantTable>;
 
   // Orders
-  getOrders(): Promise<Order[]>;
-  getOrder(id: string): Promise<Order | undefined>;
-  getOrdersByStatus(status: string): Promise<Order[]>;
-  createOrder(order: InsertOrder): Promise<Order>;
-  updateOrderStatus(id: string, status: string): Promise<Order | undefined>;
-  updatePaymentStatus(id: string, status: string): Promise<Order | undefined>;
+  getOrders(): Promise<(OrderTicket & { items: OrderItem[] })[]>;
+  getOrder(id: number): Promise<(OrderTicket & { items: OrderItem[] }) | undefined>;
+  getOrdersByStatus(status: string): Promise<(OrderTicket & { items: OrderItem[] })[]>;
+  createOrder(data: { orderNumber: string; tableId: number | null; customerId: number | null; totalAmount: string }): Promise<OrderTicket>;
+  updateOrderStatus(id: number, status: string): Promise<OrderTicket | undefined>;
 
   // Order Items
-  getOrderItems(orderId: string): Promise<OrderItem[]>;
-  createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
+  getOrderItems(orderId: number): Promise<OrderItem[]>;
+  createOrderItem(data: { orderId: number; menuItemId: number; quantity: number; unitPrice: string; note?: string }): Promise<OrderItem>;
 
   // Analytics
-  getDailyRevenue(days: number): Promise<{ date: string; revenue: number; orders: number }[]>;
-  getTopSellingItems(limit: number): Promise<{ name: string; orders: number; revenue: number }[]>;
   getTotalRevenue(): Promise<number>;
   getTotalOrders(): Promise<number>;
+  getTopSellingItems(limit: number): Promise<{ name: string; orders: number; revenue: number }[]>;
+  getDailyRevenue(days: number): Promise<{ date: string; revenue: number; orders: number }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
-  // Users
-  async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+  // Staff
+  async getStaff(id: number): Promise<Staff | undefined> {
+    const [s] = await db.select().from(staff).where(eq(staff.id, id));
+    return s;
   }
 
-  async getUserByPhone(phone: string): Promise<User | undefined> {
+  async getStaffByUsername(username: string): Promise<Staff | undefined> {
+    const [s] = await db.select().from(staff).where(eq(staff.username, username));
+    return s;
+  }
+
+  async createStaff(data: InsertStaff): Promise<Staff> {
+    const [s] = await db.insert(staff).values(data).returning();
+    return s;
+  }
+
+  // Customers
+  async getCustomer(id: number): Promise<Customer | undefined> {
+    const [c] = await db.select().from(customers).where(eq(customers.id, id));
+    return c;
+  }
+
+  async getCustomerByPhone(phone: string): Promise<Customer | undefined> {
     const normalizedPhone = phone.replace(/\D/g, "");
-    const [user] = await db.select().from(users).where(
-      sql`REGEXP_REPLACE(${users.phone}, '[^0-9]', '', 'g') = ${normalizedPhone}`
+    const [c] = await db.select().from(customers).where(
+      sql`REGEXP_REPLACE(${customers.phone}, '[^0-9]', '', 'g') = ${normalizedPhone}`
     );
-    return user;
+    return c;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
+  async createCustomer(data: InsertCustomer): Promise<Customer> {
+    const [c] = await db.insert(customers).values(data).returning();
+    return c;
   }
 
   // Menu Items
   async getMenuItems(): Promise<MenuItem[]> {
-    return db.select().from(menuItems).where(eq(menuItems.isAvailable, true));
+    return db.select().from(menuItems).where(eq(menuItems.isSoldOut, false));
   }
 
-  async getMenuItem(id: string): Promise<MenuItem | undefined> {
+  async getMenuItem(id: number): Promise<MenuItem | undefined> {
     const [item] = await db.select().from(menuItems).where(eq(menuItems.id, id));
     return item;
   }
 
   async createMenuItem(item: InsertMenuItem): Promise<MenuItem> {
-    const [menuItem] = await db.insert(menuItems).values(item).returning();
-    return menuItem;
+    const [created] = await db.insert(menuItems).values(item).returning();
+    return created;
   }
 
-  async updateMenuItem(id: string, item: Partial<InsertMenuItem>): Promise<MenuItem | undefined> {
-    const [updated] = await db.update(menuItems).set(item).where(eq(menuItems.id, id)).returning();
-    return updated;
+  // Modifiers
+  async getModifiersForItem(menuItemId: number): Promise<Modifier[]> {
+    return db.select().from(modifiers).where(eq(modifiers.menuItemId, menuItemId));
   }
 
-  async deleteMenuItem(id: string): Promise<boolean> {
-    const result = await db.update(menuItems).set({ isAvailable: false }).where(eq(menuItems.id, id));
-    return true;
+  async createModifier(data: { name: string; additionalCost: string; menuItemId: number }): Promise<Modifier> {
+    const [created] = await db.insert(modifiers).values(data).returning();
+    return created;
   }
 
-  // Menu Modifiers
-  async getModifiersForItem(menuItemId: string): Promise<MenuModifier[]> {
-    return db.select().from(menuModifiers).where(eq(menuModifiers.menuItemId, menuItemId));
+  // Categories
+  async getCategories(): Promise<Category[]> {
+    return db.select().from(categories);
   }
 
-  async createModifier(modifier: InsertMenuModifier): Promise<MenuModifier> {
-    const [created] = await db.insert(menuModifiers).values(modifier).returning();
+  async createCategory(name: string): Promise<Category> {
+    const [created] = await db.insert(categories).values({ name }).returning();
     return created;
   }
 
   // Tables
-  async getTables(): Promise<Table[]> {
-    return db.select().from(tables);
+  async getTables(): Promise<RestaurantTable[]> {
+    return db.select().from(restaurantTables);
   }
 
-  async getTable(tableNumber: string): Promise<Table | undefined> {
-    const [table] = await db.select().from(tables).where(eq(tables.tableNumber, tableNumber));
+  async getTableByNumber(tableNumber: number): Promise<RestaurantTable | undefined> {
+    const [table] = await db.select().from(restaurantTables).where(eq(restaurantTables.tableNumber, tableNumber));
     return table;
   }
 
-  async createTable(table: InsertTable): Promise<Table> {
-    const [created] = await db.insert(tables).values(table).returning();
+  async createTable(tableNumber: number): Promise<RestaurantTable> {
+    const [created] = await db.insert(restaurantTables).values({ tableNumber }).returning();
     return created;
-  }
-
-  async updateTableOccupancy(tableNumber: string, isOccupied: boolean): Promise<void> {
-    await db.update(tables).set({ isOccupied }).where(eq(tables.tableNumber, tableNumber));
   }
 
   // Orders
-  async getOrders(): Promise<Order[]> {
-    return db.select().from(orders).orderBy(desc(orders.createdAt));
+  async getOrders(): Promise<(OrderTicket & { items: OrderItem[] })[]> {
+    const orders = await db.select().from(orderTickets).orderBy(desc(orderTickets.createdAt));
+    return Promise.all(orders.map(async (order) => {
+      const items = await this.getOrderItems(order.id);
+      return { ...order, items };
+    }));
   }
 
-  async getOrder(id: string): Promise<Order | undefined> {
-    const [order] = await db.select().from(orders).where(eq(orders.id, id));
-    return order;
+  async getOrder(id: number): Promise<(OrderTicket & { items: OrderItem[] }) | undefined> {
+    const [order] = await db.select().from(orderTickets).where(eq(orderTickets.id, id));
+    if (!order) return undefined;
+    const items = await this.getOrderItems(order.id);
+    return { ...order, items };
   }
 
-  async getOrdersByStatus(status: string): Promise<Order[]> {
-    return db.select().from(orders)
-      .where(eq(orders.status, status as any))
-      .orderBy(desc(orders.createdAt));
+  async getOrdersByStatus(status: string): Promise<(OrderTicket & { items: OrderItem[] })[]> {
+    const orders = await db.select().from(orderTickets)
+      .where(eq(orderTickets.status, status as any))
+      .orderBy(desc(orderTickets.createdAt));
+    return Promise.all(orders.map(async (order) => {
+      const items = await this.getOrderItems(order.id);
+      return { ...order, items };
+    }));
   }
 
-  async createOrder(order: InsertOrder): Promise<Order> {
-    const [created] = await db.insert(orders).values(order).returning();
+  async createOrder(data: { orderNumber: string; tableId: number | null; customerId: number | null; totalAmount: string }): Promise<OrderTicket> {
+    const [created] = await db.insert(orderTickets).values(data).returning();
     return created;
   }
 
-  async updateOrderStatus(id: string, status: string): Promise<Order | undefined> {
-    const [updated] = await db.update(orders)
-      .set({ status: status as any, updatedAt: new Date() })
-      .where(eq(orders.id, id))
-      .returning();
-    return updated;
-  }
-
-  async updatePaymentStatus(id: string, status: string): Promise<Order | undefined> {
-    const [updated] = await db.update(orders)
-      .set({ paymentStatus: status as any, updatedAt: new Date() })
-      .where(eq(orders.id, id))
+  async updateOrderStatus(id: number, status: string): Promise<OrderTicket | undefined> {
+    const completedAt = status === "delivered" ? new Date() : undefined;
+    const [updated] = await db.update(orderTickets)
+      .set({ status: status as any, completedAt })
+      .where(eq(orderTickets.id, id))
       .returning();
     return updated;
   }
 
   // Order Items
-  async getOrderItems(orderId: string): Promise<OrderItem[]> {
+  async getOrderItems(orderId: number): Promise<OrderItem[]> {
     return db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
   }
 
-  async createOrderItem(item: InsertOrderItem): Promise<OrderItem> {
-    const [created] = await db.insert(orderItems).values(item).returning();
+  async createOrderItem(data: { orderId: number; menuItemId: number; quantity: number; unitPrice: string; note?: string }): Promise<OrderItem> {
+    const [created] = await db.insert(orderItems).values(data).returning();
     return created;
   }
 
   // Analytics
-  async getDailyRevenue(days: number): Promise<{ date: string; revenue: number; orders: number }[]> {
-    const result = await db.execute(sql`
-      SELECT 
-        TO_CHAR(created_at, 'Dy') as date,
-        COALESCE(SUM(CAST(total AS DECIMAL)), 0) as revenue,
-        COUNT(*) as orders
-      FROM orders
-      WHERE created_at >= NOW() - INTERVAL '${sql.raw(String(days))} days'
-      GROUP BY TO_CHAR(created_at, 'Dy'), DATE(created_at)
-      ORDER BY DATE(created_at)
-    `);
-    return result.rows as any;
+  async getTotalRevenue(): Promise<number> {
+    const result = await db.execute(sql`SELECT COALESCE(SUM(CAST(total_amount AS DECIMAL)), 0) as total FROM order_tickets`);
+    return parseFloat((result.rows[0] as any)?.total || "0");
+  }
+
+  async getTotalOrders(): Promise<number> {
+    const result = await db.execute(sql`SELECT COUNT(*) as count FROM order_tickets`);
+    return parseInt((result.rows[0] as any)?.count || "0");
   }
 
   async getTopSellingItems(limit: number): Promise<{ name: string; orders: number; revenue: number }[]> {
     const result = await db.execute(sql`
       SELECT 
-        name,
-        SUM(quantity) as orders,
-        SUM(CAST(price AS DECIMAL) * quantity) as revenue
-      FROM order_items
-      GROUP BY name
+        oi.menu_item_id,
+        mi.name,
+        CAST(SUM(oi.quantity) AS INTEGER) as orders,
+        CAST(SUM(CAST(oi.unit_price AS DECIMAL) * oi.quantity) AS DECIMAL) as revenue
+      FROM order_items oi
+      JOIN menu_items mi ON oi.menu_item_id = mi.id
+      GROUP BY oi.menu_item_id, mi.name
       ORDER BY orders DESC
       LIMIT ${limit}
     `);
-    return result.rows as any;
+    return result.rows.map((row: any) => ({
+      name: row.name,
+      orders: parseInt(row.orders),
+      revenue: parseFloat(row.revenue),
+    }));
   }
 
-  async getTotalRevenue(): Promise<number> {
+  async getDailyRevenue(days: number): Promise<{ date: string; revenue: number; orders: number }[]> {
     const result = await db.execute(sql`
-      SELECT COALESCE(SUM(CAST(total AS DECIMAL)), 0) as total FROM orders
+      SELECT 
+        TO_CHAR(created_at, 'Dy') as date,
+        COALESCE(SUM(CAST(total_amount AS DECIMAL)), 0) as revenue,
+        COUNT(*) as orders
+      FROM order_tickets
+      WHERE created_at >= NOW() - INTERVAL '${sql.raw(String(days))} days'
+      GROUP BY TO_CHAR(created_at, 'Dy'), DATE(created_at)
+      ORDER BY DATE(created_at)
     `);
-    return parseFloat((result.rows[0] as any)?.total || "0");
-  }
-
-  async getTotalOrders(): Promise<number> {
-    const result = await db.execute(sql`
-      SELECT COUNT(*) as count FROM orders
-    `);
-    return parseInt((result.rows[0] as any)?.count || "0");
+    return result.rows.map((row: any) => ({
+      date: row.date,
+      revenue: parseFloat(row.revenue),
+      orders: parseInt(row.orders),
+    }));
   }
 }
 

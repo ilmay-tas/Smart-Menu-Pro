@@ -12,10 +12,12 @@ export default function CategoryTabs({
   activeCategory,
   onCategoryChange,
 }: CategoryTabsProps) {
+  const validCategories = categories.filter((cat): cat is string => Boolean(cat));
+  
   return (
     <ScrollArea className="w-full whitespace-nowrap">
       <div className="flex gap-2 pb-2">
-        {categories.map((category) => {
+        {validCategories.map((category) => {
           const isActive = activeCategory === category;
           return (
             <Button

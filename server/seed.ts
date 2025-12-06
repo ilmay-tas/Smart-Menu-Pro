@@ -1,55 +1,62 @@
 import { db } from "./db";
-import { menuItems, menuModifiers, tables } from "@shared/schema";
+import { menuItems, modifiers, restaurantTables, categories } from "@shared/schema";
+
+const categoryData = [
+  { name: "Starters" },
+  { name: "Mains" },
+  { name: "Desserts" },
+  { name: "Drinks" },
+];
 
 const menuData = [
   {
     name: "Classic Beef Burger",
     description: "Juicy beef patty with melted cheese, fresh lettuce, tomato, and our special sauce",
     price: "14.99",
-    image: "/menu/burger.png",
+    imageUrl: "/menu/burger.png",
     category: "Mains",
     isVegan: false,
     isGlutenFree: false,
     isSpicy: false,
     allergens: ["Gluten", "Dairy"],
     modifiers: [
-      { name: "Extra Cheese", price: "1.50" },
-      { name: "Add Bacon", price: "2.00" },
+      { name: "Extra Cheese", additionalCost: "1.50" },
+      { name: "Add Bacon", additionalCost: "2.00" },
     ],
   },
   {
     name: "Pasta Carbonara",
     description: "Creamy pasta with crispy bacon, parmesan cheese, and fresh parsley",
     price: "16.99",
-    image: "/menu/pasta.png",
+    imageUrl: "/menu/pasta.png",
     category: "Mains",
     isVegan: false,
     isGlutenFree: false,
     isSpicy: false,
     allergens: ["Gluten", "Dairy", "Eggs"],
     modifiers: [
-      { name: "Extra Bacon", price: "2.50" },
+      { name: "Extra Bacon", additionalCost: "2.50" },
     ],
   },
   {
     name: "Caesar Salad",
     description: "Fresh romaine lettuce with croutons, parmesan, and creamy Caesar dressing",
     price: "11.99",
-    image: "/menu/salad.png",
+    imageUrl: "/menu/salad.png",
     category: "Starters",
     isVegan: false,
     isGlutenFree: true,
     isSpicy: false,
     allergens: ["Dairy", "Fish"],
     modifiers: [
-      { name: "Add Grilled Chicken", price: "4.00" },
+      { name: "Add Grilled Chicken", additionalCost: "4.00" },
     ],
   },
   {
     name: "Grilled Salmon",
     description: "Fresh Atlantic salmon with lemon butter sauce and seasonal vegetables",
     price: "22.99",
-    image: "/menu/salmon.png",
+    imageUrl: "/menu/salmon.png",
     category: "Mains",
     isVegan: false,
     isGlutenFree: true,
@@ -61,7 +68,7 @@ const menuData = [
     name: "Chocolate Lava Cake",
     description: "Warm chocolate cake with molten center, served with vanilla ice cream",
     price: "8.99",
-    image: "/menu/cake.png",
+    imageUrl: "/menu/cake.png",
     category: "Desserts",
     isVegan: false,
     isGlutenFree: false,
@@ -73,20 +80,18 @@ const menuData = [
     name: "Margherita Pizza",
     description: "Classic pizza with fresh mozzarella, tomato sauce, and basil",
     price: "15.99",
-    image: "/menu/pizza.png",
+    imageUrl: "/menu/pizza.png",
     category: "Mains",
     isVegan: false,
     isGlutenFree: false,
     isSpicy: false,
     allergens: ["Gluten", "Dairy"],
     modifiers: [
-      { name: "Extra Mozzarella", price: "2.00" },
-      { name: "Add Olives", price: "1.00" },
+      { name: "Extra Mozzarella", additionalCost: "2.00" },
+      { name: "Add Olives", additionalCost: "1.00" },
     ],
   },
 ];
-
-const tableNumbers = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
 
 export async function seedDatabase() {
   console.log("Seeding database...");
@@ -98,24 +103,34 @@ export async function seedDatabase() {
     return;
   }
 
+  // Seed categories
+  const categoryMap: Record<string, number> = {};
+  for (const cat of categoryData) {
+    const [created] = await db.insert(categories).values(cat).returning();
+    categoryMap[cat.name] = created.id;
+  }
+
   // Seed menu items
   for (const item of menuData) {
-    const { modifiers, ...menuItem } = item;
-    const [created] = await db.insert(menuItems).values(menuItem).returning();
+    const { modifiers: itemModifiers, category, ...menuItem } = item;
+    const [created] = await db.insert(menuItems).values({
+      ...menuItem,
+      categoryId: categoryMap[category],
+    }).returning();
     
-    // Add modifiers for the menu item
-    for (const modifier of modifiers) {
-      await db.insert(menuModifiers).values({
+    // Add modifiers
+    for (const mod of itemModifiers) {
+      await db.insert(modifiers).values({
         menuItemId: created.id,
-        name: modifier.name,
-        price: modifier.price,
+        name: mod.name,
+        additionalCost: mod.additionalCost,
       });
     }
   }
 
-  // Seed tables
-  for (const tableNumber of tableNumbers) {
-    await db.insert(tables).values({ tableNumber, isOccupied: false });
+  // Seed tables (1-12)
+  for (let i = 1; i <= 12; i++) {
+    await db.insert(restaurantTables).values({ tableNumber: i });
   }
 
   console.log("Database seeded successfully!");

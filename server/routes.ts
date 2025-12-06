@@ -1,21 +1,33 @@
-import type { Express, Request, Response } from "express";
+import type { Express } from "express";
 import type { Server } from "http";
 import session from "express-session";
+import bcrypt from "bcryptjs";
 import { storage } from "./storage";
 import { seedDatabase } from "./seed";
 import {
-  signUpSchema,
-  signInSchema,
+  staffSignUpSchema,
+  staffSignInSchema,
+  customerSignUpSchema,
+  customerSignInSchema,
   createOrderSchema,
   updateOrderStatusSchema,
-  insertMenuItemSchema,
 } from "@shared/schema";
 
 declare module "express-session" {
   interface SessionData {
-    userId: string;
-    userRole: string;
+    staffId: number;
+    staffRole: string;
+    customerId: number;
+    userType: "staff" | "customer";
   }
+}
+
+async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 10);
+}
+
+async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
 }
 
 export async function registerRoutes(app: Express, httpServer: Server): Promise<void> {
@@ -31,54 +43,108 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       cookie: {
         secure: process.env.NODE_ENV === "production",
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        maxAge: 24 * 60 * 60 * 1000,
       },
     })
   );
-  // Auth routes
-  app.post("/api/auth/signup", async (req, res) => {
+
+  // ============ STAFF AUTH ============
+  app.post("/api/staff/signup", async (req, res) => {
     try {
-      const data = signUpSchema.parse(req.body);
-      const normalizedPhone = data.phone.replace(/\D/g, "");
+      const data = staffSignUpSchema.parse(req.body);
       
-      const existingUser = await storage.getUserByPhone(normalizedPhone);
-      if (existingUser) {
-        return res.status(400).json({ error: "Phone number already registered" });
+      const existing = await storage.getStaffByUsername(data.username);
+      if (existing) {
+        return res.status(400).json({ error: "Username already taken" });
       }
 
-      const user = await storage.createUser({
-        phone: data.phone,
+      const hashedPassword = await hashPassword(data.password);
+      const staff = await storage.createStaff({
+        username: data.username,
+        passwordHash: hashedPassword,
         name: data.name,
         role: data.role,
       });
 
-      req.session.userId = user.id;
-      req.session.userRole = user.role;
+      req.session.staffId = staff.id;
+      req.session.staffRole = staff.role;
+      req.session.userType = "staff";
 
-      res.json({ user: { id: user.id, name: user.name, phone: user.phone, role: user.role } });
+      res.json({ user: { id: staff.id, name: staff.name, username: staff.username, role: staff.role, type: "staff" } });
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Invalid request" });
     }
   });
 
-  app.post("/api/auth/signin", async (req, res) => {
+  app.post("/api/staff/signin", async (req, res) => {
     try {
-      const data = signInSchema.parse(req.body);
-      const user = await storage.getUserByPhone(data.phone);
+      const data = staffSignInSchema.parse(req.body);
       
-      if (!user) {
+      const staff = await storage.getStaffByUsername(data.username);
+      if (!staff) {
+        return res.status(401).json({ error: "Invalid username or password" });
+      }
+
+      const isValidPassword = await verifyPassword(data.password, staff.passwordHash);
+      if (!isValidPassword) {
+        return res.status(401).json({ error: "Invalid username or password" });
+      }
+
+      req.session.staffId = staff.id;
+      req.session.staffRole = staff.role;
+      req.session.userType = "staff";
+
+      res.json({ user: { id: staff.id, name: staff.name, username: staff.username, role: staff.role, type: "staff" } });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Invalid request" });
+    }
+  });
+
+  // ============ CUSTOMER AUTH ============
+  app.post("/api/customer/signup", async (req, res) => {
+    try {
+      const data = customerSignUpSchema.parse(req.body);
+      const normalizedPhone = data.phone.replace(/\D/g, "");
+      
+      const existing = await storage.getCustomerByPhone(normalizedPhone);
+      if (existing) {
+        return res.status(400).json({ error: "Phone number already registered" });
+      }
+
+      const customer = await storage.createCustomer({
+        phone: normalizedPhone,
+        name: data.name,
+      });
+
+      req.session.customerId = customer.id;
+      req.session.userType = "customer";
+
+      res.json({ user: { id: customer.id, name: customer.name, phone: customer.phone, type: "customer" } });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Invalid request" });
+    }
+  });
+
+  app.post("/api/customer/signin", async (req, res) => {
+    try {
+      const data = customerSignInSchema.parse(req.body);
+      const normalizedPhone = data.phone.replace(/\D/g, "");
+      
+      const customer = await storage.getCustomerByPhone(normalizedPhone);
+      if (!customer) {
         return res.status(401).json({ error: "Phone number not found. Please sign up first." });
       }
 
-      req.session.userId = user.id;
-      req.session.userRole = user.role;
+      req.session.customerId = customer.id;
+      req.session.userType = "customer";
 
-      res.json({ user: { id: user.id, name: user.name, phone: user.phone, role: user.role } });
+      res.json({ user: { id: customer.id, name: customer.name, phone: customer.phone, type: "customer" } });
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Invalid request" });
     }
   });
 
+  // ============ COMMON AUTH ============
   app.post("/api/auth/signout", (req, res) => {
     req.session.destroy((err) => {
       if (err) {
@@ -89,98 +155,78 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   });
 
   app.get("/api/auth/me", async (req, res) => {
-    if (!req.session.userId) {
-      return res.status(401).json({ error: "Not authenticated" });
+    if (req.session.userType === "staff" && req.session.staffId) {
+      const staff = await storage.getStaff(req.session.staffId);
+      if (!staff) return res.status(401).json({ error: "Not authenticated" });
+      return res.json({ user: { id: staff.id, name: staff.name, username: staff.username, role: staff.role, type: "staff" } });
     }
 
-    const user = await storage.getUser(req.session.userId);
-    if (!user) {
-      return res.status(401).json({ error: "User not found" });
+    if (req.session.userType === "customer" && req.session.customerId) {
+      const customer = await storage.getCustomer(req.session.customerId);
+      if (!customer) return res.status(401).json({ error: "Not authenticated" });
+      return res.json({ user: { id: customer.id, name: customer.name, phone: customer.phone, type: "customer" } });
     }
 
-    res.json({ user: { id: user.id, name: user.name, phone: user.phone, role: user.role } });
+    return res.status(401).json({ error: "Not authenticated" });
   });
 
-  // Menu routes
+  // ============ MENU ============
   app.get("/api/menu", async (req, res) => {
     try {
       const items = await storage.getMenuItems();
-      const itemsWithModifiers = await Promise.all(
+      const cats = await storage.getCategories();
+      const categoryMap = Object.fromEntries(cats.map((c) => [c.id, c.name]));
+      
+      const itemsWithDetails = await Promise.all(
         items.map(async (item) => {
-          const modifiers = await storage.getModifiersForItem(item.id);
-          return { ...item, modifiers };
+          const mods = await storage.getModifiersForItem(item.id);
+          return {
+            id: String(item.id),
+            name: item.name,
+            description: item.description || "",
+            price: item.price,
+            image: item.imageUrl || "/menu/default.png",
+            category: item.categoryId ? categoryMap[item.categoryId] || "Other" : "Other",
+            isVegan: item.isVegan,
+            isGlutenFree: item.isGlutenFree,
+            isSpicy: item.isSpicy,
+            allergens: item.allergens,
+            modifiers: mods.map((m) => ({
+              id: String(m.id),
+              name: m.name,
+              price: m.additionalCost,
+            })),
+          };
         })
       );
-      res.json(itemsWithModifiers);
+      res.json(itemsWithDetails);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.get("/api/menu/:id", async (req, res) => {
+  app.get("/api/categories", async (req, res) => {
     try {
-      const item = await storage.getMenuItem(req.params.id);
-      if (!item) {
-        return res.status(404).json({ error: "Menu item not found" });
-      }
-      const modifiers = await storage.getModifiersForItem(item.id);
-      res.json({ ...item, modifiers });
+      const cats = await storage.getCategories();
+      res.json(cats);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.post("/api/menu", async (req, res) => {
-    try {
-      const data = insertMenuItemSchema.parse(req.body);
-      const item = await storage.createMenuItem(data);
-      res.json(item);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
-    }
-  });
-
-  app.patch("/api/menu/:id", async (req, res) => {
-    try {
-      const item = await storage.updateMenuItem(req.params.id, req.body);
-      if (!item) {
-        return res.status(404).json({ error: "Menu item not found" });
-      }
-      res.json(item);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
-    }
-  });
-
-  app.delete("/api/menu/:id", async (req, res) => {
-    try {
-      await storage.deleteMenuItem(req.params.id);
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Order routes
+  // ============ ORDERS ============
   app.get("/api/orders", async (req, res) => {
     try {
       const { status } = req.query;
-      let ordersList;
+      let orders;
       
       if (status && status !== "all") {
-        ordersList = await storage.getOrdersByStatus(status as string);
+        orders = await storage.getOrdersByStatus(status as string);
       } else {
-        ordersList = await storage.getOrders();
+        orders = await storage.getOrders();
       }
 
-      const ordersWithItems = await Promise.all(
-        ordersList.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
-        })
-      );
-
-      res.json(ordersWithItems);
+      res.json(orders);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -188,12 +234,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.get("/api/orders/:id", async (req, res) => {
     try {
-      const order = await storage.getOrder(req.params.id);
+      const order = await storage.getOrder(parseInt(req.params.id));
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
       }
-      const items = await storage.getOrderItems(order.id);
-      res.json({ ...order, items });
+      res.json(order);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -203,23 +248,17 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     try {
       const data = createOrderSchema.parse(req.body);
       
-      const subtotal = data.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-      const tax = subtotal * 0.1;
-      const total = subtotal + tax;
-
-      // Generate order number
+      const totalAmount = data.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
       const totalOrders = await storage.getTotalOrders();
       const orderNumber = String(totalOrders + 1).padStart(3, "0");
 
+      const table = await storage.getTableByNumber(data.tableNumber);
+      
       const order = await storage.createOrder({
         orderNumber,
-        tableNumber: data.tableNumber,
-        userId: req.session.userId || null,
-        status: "new",
-        paymentStatus: "pending",
-        subtotal: subtotal.toFixed(2),
-        tax: tax.toFixed(2),
-        total: total.toFixed(2),
+        tableId: table?.id || null,
+        customerId: req.session.customerId || null,
+        totalAmount: totalAmount.toFixed(2),
       });
 
       // Create order items
@@ -228,17 +267,15 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
           storage.createOrderItem({
             orderId: order.id,
             menuItemId: item.menuItemId,
-            name: item.name,
             quantity: item.quantity,
-            price: item.price.toFixed(2),
-            modifiers: item.modifiers || [],
-            notes: item.notes || null,
+            unitPrice: item.unitPrice.toFixed(2),
+            note: item.note,
           })
         )
       );
 
-      const items = await storage.getOrderItems(order.id);
-      res.json({ ...order, items });
+      const fullOrder = await storage.getOrder(order.id);
+      res.json(fullOrder);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -247,40 +284,51 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   app.patch("/api/orders/:id/status", async (req, res) => {
     try {
       const data = updateOrderStatusSchema.parse(req.body);
-      const order = await storage.updateOrderStatus(req.params.id, data.status);
+      const order = await storage.updateOrderStatus(parseInt(req.params.id), data.status);
       
       if (!order) {
         return res.status(404).json({ error: "Order not found" });
       }
 
-      const items = await storage.getOrderItems(order.id);
-      res.json({ ...order, items });
+      const fullOrder = await storage.getOrder(order.id);
+      res.json(fullOrder);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  app.patch("/api/orders/:id/payment", async (req, res) => {
+  // ============ TABLES ============
+  app.get("/api/tables", async (req, res) => {
     try {
-      const { status } = req.body;
-      const order = await storage.updatePaymentStatus(req.params.id, status);
-      
-      if (!order) {
-        return res.status(404).json({ error: "Order not found" });
-      }
-
-      res.json(order);
+      const tables = await storage.getTables();
+      res.json(tables);
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      res.status(500).json({ error: error.message });
     }
   });
 
-  // Analytics routes (for owner dashboard)
-  app.get("/api/analytics/daily-revenue", async (req, res) => {
+  // ============ ANALYTICS ============
+  app.get("/api/analytics/summary", async (req, res) => {
     try {
-      const days = parseInt(req.query.days as string) || 7;
-      const data = await storage.getDailyRevenue(days);
-      res.json(data);
+      const [totalRevenue, totalOrders, tables] = await Promise.all([
+        storage.getTotalRevenue(),
+        storage.getTotalOrders(),
+        storage.getTables(),
+      ]);
+
+      const orders = await storage.getOrders();
+      const activeOrders = orders.filter((o) => o.status !== "delivered").length;
+      const occupiedTables = tables.filter((t) => t.isOccupied).length;
+      const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+
+      res.json({
+        totalRevenue,
+        totalOrders,
+        activeOrders,
+        occupiedTables,
+        totalTables: tables.length,
+        avgOrderValue,
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -296,51 +344,13 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
-  app.get("/api/analytics/summary", async (req, res) => {
+  app.get("/api/analytics/daily-revenue", async (req, res) => {
     try {
-      const [totalRevenue, totalOrders, ordersData, tablesData] = await Promise.all([
-        storage.getTotalRevenue(),
-        storage.getTotalOrders(),
-        storage.getOrders(),
-        storage.getTables(),
-      ]);
-
-      const activeOrders = ordersData.filter(
-        (o) => o.status !== "delivered"
-      ).length;
-      const occupiedTables = tablesData.filter((t) => t.isOccupied).length;
-      const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-
-      res.json({
-        totalRevenue,
-        totalOrders,
-        activeOrders,
-        occupiedTables,
-        totalTables: tablesData.length,
-        avgOrderValue,
-      });
+      const days = parseInt(req.query.days as string) || 7;
+      const data = await storage.getDailyRevenue(days);
+      res.json(data);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
-
-  // Tables routes
-  app.get("/api/tables", async (req, res) => {
-    try {
-      const tablesList = await storage.getTables();
-      res.json(tablesList);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post("/api/tables", async (req, res) => {
-    try {
-      const table = await storage.createTable(req.body);
-      res.json(table);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
-    }
-  });
-
 }

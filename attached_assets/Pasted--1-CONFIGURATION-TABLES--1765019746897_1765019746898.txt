@@ -1,0 +1,156 @@
+//////////////////////////////////////////////////////////////
+// 1. CONFIGURATION TABLES
+//////////////////////////////////////////////////////////////
+
+Table Category {
+  CategoryID int [pk]
+  Name varchar(100)
+}
+
+Table KitchenStation {
+  StationID int [pk]
+  Name varchar(100)
+}
+
+Table DietaryTag {
+  TagID int [pk]
+  Name varchar(50)
+  IconURL varchar(500)
+}
+
+Table Ingredient {
+  IngredientID int [pk]
+  Name varchar(255)
+  CurrentStock decimal(10,2)
+  Unit varchar(50)
+  LowStockThreshold int
+}
+
+Table RestaurantTable {
+  TableID int [pk]
+  TableNumber int [unique]
+  QRCodeString varchar(255) [unique]
+}
+
+Table Staff {
+  StaffID int [pk]
+  Username varchar(100) [unique]
+  PasswordHash varchar(255)
+  Role varchar(50)
+}
+
+Table Customer {
+  CustomerID int [pk]
+  DeviceFingerprint varchar(255)
+  Email varchar(255)
+  Preferences text
+}
+
+//////////////////////////////////////////////////////////////
+// 2. MENU ITEMS & COMPOSITION
+//////////////////////////////////////////////////////////////
+
+Table MenuItem {
+  ItemID int [pk]
+  Name varchar(255)
+  Price decimal(10,2)
+  Description text
+  ImageURL varchar(500)
+  NutritionalInfo text
+  IsSoldOut boolean
+  CategoryID int
+  StationID int
+}
+
+Table Recipe {
+  RecipeID int [pk]
+  MenuItemID int
+  IngredientID int
+  QuantityRequired decimal(10,2)
+}
+
+Table Modifier {
+  ModifierID int [pk]
+  Name varchar(100)
+  AdditionalCost decimal(10,2)
+  MenuItemID int
+}
+
+Table MenuDietaryTag {
+  MenuItemID int
+  TagID int
+  Note: 'Composite PK'
+  PrimaryKey: (MenuItemID, TagID)
+}
+
+//////////////////////////////////////////////////////////////
+// 3. ORDERS & TRANSACTIONS
+//////////////////////////////////////////////////////////////
+
+Table OrderTicket {
+  OrderID int [pk]
+  TableID int
+  CustomerID int
+  Status varchar(50)
+  PaymentStatus varchar(50)
+  CreatedAt datetime
+  CompletedAt datetime
+  TotalAmount decimal(10,2)
+}
+
+Table OrderItem {
+  OrderItemID int [pk]
+  OrderID int
+  MenuItemID int
+  Quantity int
+  Note text
+  UnitPrice decimal(10,2)
+}
+
+Table OrderItemModifier {
+  OrderItemID int
+  ModifierID int
+  Note: 'Composite PK'
+  PrimaryKey: (OrderItemID, ModifierID)
+}
+
+Table Feedback {
+  FeedbackID int [pk]
+  OrderID int [unique]
+  Rating int
+  Comment text
+}
+
+//////////////////////////////////////////////////////////////
+// RELATIONSHIPS
+//////////////////////////////////////////////////////////////
+
+// MenuItem → Category & KitchenStation
+Ref: MenuItem.CategoryID - Category.CategoryID [delete: set null]
+Ref: MenuItem.StationID - KitchenStation.StationID [delete: set null]
+
+// Recipe → MenuItem, Ingredient
+Ref: Recipe.MenuItemID > MenuItem.ItemID [delete: cascade]
+Ref: Recipe.IngredientID - Ingredient.IngredientID
+
+// Modifier → MenuItem
+Ref: Modifier.MenuItemID > MenuItem.ItemID [delete: cascade]
+
+// MenuDietaryTag M:N
+Ref: MenuDietaryTag.MenuItemID > MenuItem.ItemID [delete: cascade]
+Ref: MenuDietaryTag.TagID > DietaryTag.TagID [delete: cascade]
+
+// OrderTicket → RestaurantTable, Customer
+Ref: OrderTicket.TableID - RestaurantTable.TableID
+Ref: OrderTicket.CustomerID - Customer.CustomerID
+
+// OrderItem → OrderTicket, MenuItem
+Ref: OrderItem.OrderID > OrderTicket.OrderID [delete: cascade]
+Ref: OrderItem.MenuItemID - MenuItem.ItemID
+
+// OrderItemModifier M:N
+Ref: OrderItemModifier.OrderItemID > OrderItem.OrderItemID [delete: cascade]
+Ref: OrderItemModifier.ModifierID - Modifier.ModifierID
+
+// Feedback → OrderTicket
+Ref: Feedback.OrderID > OrderTicket.OrderID [delete: cascade]
