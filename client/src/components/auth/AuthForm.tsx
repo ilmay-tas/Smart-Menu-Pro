@@ -11,62 +11,71 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { UtensilsCrossed, Eye, EyeOff } from "lucide-react";
+import { UtensilsCrossed, Phone } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export type UserRole = "customer" | "waiter" | "kitchen" | "owner";
 
 interface AuthFormProps {
-  onSignIn: (email: string, password: string, role: UserRole) => void;
-  onSignUp: (
-    email: string,
-    password: string,
-    name: string,
-    role: UserRole
-  ) => void;
+  onSignIn: (phone: string, role: UserRole) => void;
+  onSignUp: (phone: string, name: string, role: UserRole) => void;
 }
 
 export default function AuthForm({ onSignIn, onSignUp }: AuthFormProps) {
   const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin");
-  const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<UserRole>("customer");
   const { toast } = useToast();
 
+  const formatPhoneNumber = (value: string) => {
+    const numbers = value.replace(/\D/g, "");
+    if (numbers.length <= 3) return numbers;
+    if (numbers.length <= 6) return `(${numbers.slice(0, 3)}) ${numbers.slice(3)}`;
+    return `(${numbers.slice(0, 3)}) ${numbers.slice(3, 6)}-${numbers.slice(6, 10)}`;
+  };
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatPhoneNumber(e.target.value);
+    setPhone(formatted);
+  };
+
+  const getDigitsOnly = (phone: string) => phone.replace(/\D/g, "");
+
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
+    const digits = getDigitsOnly(phone);
+    if (digits.length < 10) {
       toast({
         title: "Error",
-        description: "Please fill in all fields",
+        description: "Please enter a valid phone number",
         variant: "destructive",
       });
       return;
     }
-    onSignIn(email, password, role);
+    onSignIn(phone, role);
   };
 
   const handleSignUp = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password || !name) {
+    const digits = getDigitsOnly(phone);
+    if (!name.trim()) {
       toast({
         title: "Error",
-        description: "Please fill in all fields",
+        description: "Please enter your name",
         variant: "destructive",
       });
       return;
     }
-    if (password.length < 6) {
+    if (digits.length < 10) {
       toast({
         title: "Error",
-        description: "Password must be at least 6 characters",
+        description: "Please enter a valid phone number",
         variant: "destructive",
       });
       return;
     }
-    onSignUp(email, password, name, role);
+    onSignUp(phone, name, role);
   };
 
   return (
@@ -96,41 +105,18 @@ export default function AuthForm({ onSignIn, onSignUp }: AuthFormProps) {
           <TabsContent value="signin">
             <form onSubmit={handleSignIn} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="signin-email">Email</Label>
-                <Input
-                  id="signin-email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  data-testid="input-signin-email"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="signin-password">Password</Label>
+                <Label htmlFor="signin-phone">Phone Number</Label>
                 <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
-                    id="signin-password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Enter your password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    data-testid="input-signin-password"
+                    id="signin-phone"
+                    type="tel"
+                    placeholder="(555) 123-4567"
+                    value={phone}
+                    onChange={handlePhoneChange}
+                    className="pl-10"
+                    data-testid="input-signin-phone"
                   />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-full"
-                    onClick={() => setShowPassword(!showPassword)}
-                    data-testid="button-toggle-password"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </Button>
                 </div>
               </div>
               <div className="space-y-2">
@@ -174,41 +160,18 @@ export default function AuthForm({ onSignIn, onSignUp }: AuthFormProps) {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="signup-email">Email</Label>
-                <Input
-                  id="signup-email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  data-testid="input-signup-email"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="signup-password">Password</Label>
+                <Label htmlFor="signup-phone">Phone Number</Label>
                 <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
-                    id="signup-password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Create a password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    data-testid="input-signup-password"
+                    id="signup-phone"
+                    type="tel"
+                    placeholder="(555) 123-4567"
+                    value={phone}
+                    onChange={handlePhoneChange}
+                    className="pl-10"
+                    data-testid="input-signup-phone"
                   />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-full"
-                    onClick={() => setShowPassword(!showPassword)}
-                    data-testid="button-toggle-password-signup"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </Button>
                 </div>
               </div>
               <div className="space-y-2">

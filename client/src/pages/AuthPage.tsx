@@ -8,24 +8,19 @@ interface AuthPageProps {
 export default function AuthPage({ onLogin }: AuthPageProps) {
   const { toast } = useToast();
 
-  const handleSignIn = (email: string, password: string, role: UserRole) => {
+  const handleSignIn = (phone: string, role: UserRole) => {
     // todo: remove mock functionality - implement real authentication
-    console.log("Sign in:", { email, password, role });
+    console.log("Sign in:", { phone, role });
     toast({
       title: "Signed in successfully",
       description: `Welcome back!`,
     });
-    onLogin(role, email.split("@")[0]);
+    onLogin(role, "User");
   };
 
-  const handleSignUp = (
-    email: string,
-    password: string,
-    name: string,
-    role: UserRole
-  ) => {
+  const handleSignUp = (phone: string, name: string, role: UserRole) => {
     // todo: remove mock functionality - implement real authentication
-    console.log("Sign up:", { email, password, name, role });
+    console.log("Sign up:", { phone, name, role });
     toast({
       title: "Account created",
       description: "Welcome to MyDine!",
