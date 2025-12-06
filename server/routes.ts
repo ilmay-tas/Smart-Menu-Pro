@@ -11,6 +11,8 @@ import {
   customerSignInSchema,
   createOrderSchema,
   updateOrderStatusSchema,
+  updatePaymentStatusSchema,
+  createTableCallSchema,
 } from "@shared/schema";
 
 declare module "express-session" {
@@ -323,6 +325,162 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
       const fullOrder = await storage.getOrder(order.id);
       res.json(fullOrder);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/orders/:id/payment", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || !["waiter", "owner"].includes(req.session.staffRole || "")) {
+        return res.status(403).json({ error: "Only waiters and owners can process payments" });
+      }
+
+      const data = updatePaymentStatusSchema.parse(req.body);
+      const order = await storage.updatePaymentStatus(parseInt(req.params.id), data.paymentStatus);
+      
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      const fullOrder = await storage.getOrder(order.id);
+      res.json(fullOrder);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Customer orders endpoint
+  app.get("/api/customer/orders", async (req, res) => {
+    try {
+      if (req.session.userType !== "customer" || !req.session.customerId) {
+        return res.status(401).json({ error: "Customer authentication required" });
+      }
+
+      const orders = await storage.getOrdersByCustomer(req.session.customerId);
+      const tables = await storage.getTables();
+      const tableMap = Object.fromEntries(tables.map((t) => [t.id, t.tableNumber]));
+      
+      const transformedOrders = await Promise.all(
+        orders.map(async (order) => {
+          const itemsWithNames = await Promise.all(
+            order.items.map(async (item) => {
+              const menuItem = await storage.getMenuItem(item.menuItemId);
+              return {
+                id: String(item.id),
+                name: menuItem?.name || "Unknown Item",
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+              };
+            })
+          );
+          
+          return {
+            id: String(order.id),
+            orderNumber: order.orderNumber,
+            tableNumber: order.tableId ? tableMap[order.tableId] || null : null,
+            items: itemsWithNames,
+            status: order.status,
+            paymentStatus: order.paymentStatus,
+            totalAmount: order.totalAmount,
+            createdAt: order.createdAt?.toISOString() || new Date().toISOString(),
+          };
+        })
+      );
+
+      res.json(transformedOrders);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============ TABLE CALLS ============
+  app.get("/api/table-calls", async (req, res) => {
+    try {
+      const calls = await storage.getActiveCalls();
+      const tables = await storage.getTables();
+      const tableMap = Object.fromEntries(tables.map((t) => [t.id, t.tableNumber]));
+      
+      const transformedCalls = calls.map((call) => ({
+        id: call.id,
+        tableNumber: call.tableId ? tableMap[call.tableId] || null : null,
+        status: call.status,
+        createdAt: call.createdAt?.toISOString(),
+        acknowledgedAt: call.acknowledgedAt?.toISOString(),
+      }));
+
+      res.json(transformedCalls);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/table-calls", async (req, res) => {
+    try {
+      if (req.session.userType !== "customer" || !req.session.customerId) {
+        return res.status(401).json({ error: "Customer authentication required" });
+      }
+
+      const data = createTableCallSchema.parse(req.body);
+      const table = await storage.getTableByNumber(data.tableNumber);
+      
+      if (!table) {
+        return res.status(404).json({ error: "Table not found" });
+      }
+
+      // Check if there's already an active call for this table
+      const existingCalls = await storage.getCallsByTable(table.id);
+      if (existingCalls.length > 0) {
+        return res.status(400).json({ error: "There's already an active waiter call for your table" });
+      }
+
+      const call = await storage.createTableCall({
+        tableId: table.id,
+        customerId: req.session.customerId,
+      });
+
+      res.json({
+        id: call.id,
+        tableNumber: data.tableNumber,
+        status: call.status,
+        createdAt: call.createdAt?.toISOString(),
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/table-calls/:id/acknowledge", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || !req.session.staffId) {
+        return res.status(403).json({ error: "Staff authentication required" });
+      }
+
+      const call = await storage.acknowledgeCall(parseInt(req.params.id), req.session.staffId);
+      
+      if (!call) {
+        return res.status(404).json({ error: "Table call not found" });
+      }
+
+      res.json(call);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/table-calls/:id/resolve", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || !req.session.staffId) {
+        return res.status(403).json({ error: "Staff authentication required" });
+      }
+
+      const call = await storage.resolveCall(parseInt(req.params.id));
+      
+      if (!call) {
+        return res.status(404).json({ error: "Table call not found" });
+      }
+
+      res.json(call);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }

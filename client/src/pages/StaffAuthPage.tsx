@@ -239,8 +239,8 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
           <p className="text-sm text-muted-foreground">
             Are you a customer?{" "}
             <Button
-              variant="link"
-              className="p-0 h-auto"
+              variant="ghost"
+              className="p-0 h-auto underline"
               onClick={onSwitchToCustomer}
               data-testid="link-customer-login"
             >

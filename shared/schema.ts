@@ -7,6 +7,7 @@ import { z } from "zod";
 export const staffRoleEnum = pgEnum("staff_role", ["waiter", "kitchen", "owner"]);
 export const orderStatusEnum = pgEnum("order_status", ["new", "in_progress", "ready", "delivered"]);
 export const paymentStatusEnum = pgEnum("payment_status", ["pending", "paid"]);
+export const callStatusEnum = pgEnum("call_status", ["pending", "acknowledged", "resolved"]);
 
 // Configuration Tables
 export const categories = pgTable("categories", {
@@ -130,6 +131,18 @@ export const feedback = pgTable("feedback", {
   comment: text("comment"),
 });
 
+// Table Calls (when customer calls waiter)
+export const tableCalls = pgTable("table_calls", {
+  id: serial("id").primaryKey(),
+  tableId: integer("table_id").notNull().references(() => restaurantTables.id),
+  customerId: integer("customer_id").references(() => customers.id),
+  status: callStatusEnum("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  resolvedAt: timestamp("resolved_at"),
+  acknowledgedBy: integer("acknowledged_by").references(() => staff.id),
+});
+
 // Insert Schemas
 export const insertStaffSchema = createInsertSchema(staff).omit({ id: true, createdAt: true });
 export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, createdAt: true });
@@ -139,6 +152,7 @@ export const insertCategorySchema = createInsertSchema(categories).omit({ id: tr
 export const insertRestaurantTableSchema = createInsertSchema(restaurantTables).omit({ id: true });
 export const insertOrderTicketSchema = createInsertSchema(orderTickets).omit({ id: true, createdAt: true, completedAt: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
+export const insertTableCallSchema = createInsertSchema(tableCalls).omit({ id: true, createdAt: true, acknowledgedAt: true, resolvedAt: true });
 
 // Types
 export type InsertStaff = z.infer<typeof insertStaffSchema>;
@@ -157,6 +171,8 @@ export type Category = typeof categories.$inferSelect;
 export type RestaurantTable = typeof restaurantTables.$inferSelect;
 export type OrderTicket = typeof orderTickets.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
+export type TableCall = typeof tableCalls.$inferSelect;
+export type InsertTableCall = z.infer<typeof insertTableCallSchema>;
 
 // API Request/Response Schemas
 export const staffSignUpSchema = z.object({
@@ -196,9 +212,24 @@ export const updateOrderStatusSchema = z.object({
   status: z.enum(["new", "in_progress", "ready", "delivered"]),
 });
 
+export const updatePaymentStatusSchema = z.object({
+  paymentStatus: z.enum(["pending", "paid"]),
+  paymentMethod: z.enum(["cash", "card"]).optional(),
+});
+
+export const createTableCallSchema = z.object({
+  tableNumber: z.number(),
+});
+
+export const acknowledgeTableCallSchema = z.object({
+  callId: z.number(),
+});
+
 export type StaffSignUpRequest = z.infer<typeof staffSignUpSchema>;
 export type StaffSignInRequest = z.infer<typeof staffSignInSchema>;
 export type CustomerSignUpRequest = z.infer<typeof customerSignUpSchema>;
 export type CustomerSignInRequest = z.infer<typeof customerSignInSchema>;
 export type CreateOrderRequest = z.infer<typeof createOrderSchema>;
 export type UpdateOrderStatusRequest = z.infer<typeof updateOrderStatusSchema>;
+export type UpdatePaymentStatusRequest = z.infer<typeof updatePaymentStatusSchema>;
+export type CreateTableCallRequest = z.infer<typeof createTableCallSchema>;

@@ -97,7 +97,7 @@ function AppContent() {
   if (user.type === "customer") {
     return (
       <CustomerMenu
-        tableNumber={12}
+        tableNumber="12"
         userName={user.name}
         onLogout={handleLogout}
       />

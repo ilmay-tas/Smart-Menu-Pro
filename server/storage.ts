@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and, ne } from "drizzle-orm";
 import {
   staff,
   customers,
@@ -9,6 +9,7 @@ import {
   orderItems,
   restaurantTables,
   categories,
+  tableCalls,
   type Staff,
   type InsertStaff,
   type Customer,
@@ -20,6 +21,8 @@ import {
   type OrderItem,
   type RestaurantTable,
   type Category,
+  type TableCall,
+  type InsertTableCall,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -61,6 +64,19 @@ export interface IStorage {
   // Order Items
   getOrderItems(orderId: number): Promise<OrderItem[]>;
   createOrderItem(data: { orderId: number; menuItemId: number; quantity: number; unitPrice: string; note?: string }): Promise<OrderItem>;
+
+  // Payment
+  updatePaymentStatus(orderId: number, paymentStatus: string): Promise<OrderTicket | undefined>;
+
+  // Table Calls
+  getActiveCalls(): Promise<TableCall[]>;
+  getCallsByTable(tableId: number): Promise<TableCall[]>;
+  createTableCall(data: InsertTableCall): Promise<TableCall>;
+  acknowledgeCall(callId: number, staffId: number): Promise<TableCall | undefined>;
+  resolveCall(callId: number): Promise<TableCall | undefined>;
+
+  // Customer Orders
+  getOrdersByCustomer(customerId: number): Promise<(OrderTicket & { items: OrderItem[] })[]>;
 
   // Analytics
   getTotalRevenue(): Promise<number>;
@@ -203,6 +219,59 @@ export class DatabaseStorage implements IStorage {
   async createOrderItem(data: { orderId: number; menuItemId: number; quantity: number; unitPrice: string; note?: string }): Promise<OrderItem> {
     const [created] = await db.insert(orderItems).values(data).returning();
     return created;
+  }
+
+  // Payment
+  async updatePaymentStatus(orderId: number, paymentStatus: string): Promise<OrderTicket | undefined> {
+    const [updated] = await db.update(orderTickets)
+      .set({ paymentStatus: paymentStatus as any })
+      .where(eq(orderTickets.id, orderId))
+      .returning();
+    return updated;
+  }
+
+  // Table Calls
+  async getActiveCalls(): Promise<TableCall[]> {
+    return db.select().from(tableCalls)
+      .where(ne(tableCalls.status, "resolved"))
+      .orderBy(desc(tableCalls.createdAt));
+  }
+
+  async getCallsByTable(tableId: number): Promise<TableCall[]> {
+    return db.select().from(tableCalls)
+      .where(and(eq(tableCalls.tableId, tableId), ne(tableCalls.status, "resolved")));
+  }
+
+  async createTableCall(data: InsertTableCall): Promise<TableCall> {
+    const [created] = await db.insert(tableCalls).values(data).returning();
+    return created;
+  }
+
+  async acknowledgeCall(callId: number, staffId: number): Promise<TableCall | undefined> {
+    const [updated] = await db.update(tableCalls)
+      .set({ status: "acknowledged", acknowledgedAt: new Date(), acknowledgedBy: staffId })
+      .where(eq(tableCalls.id, callId))
+      .returning();
+    return updated;
+  }
+
+  async resolveCall(callId: number): Promise<TableCall | undefined> {
+    const [updated] = await db.update(tableCalls)
+      .set({ status: "resolved", resolvedAt: new Date() })
+      .where(eq(tableCalls.id, callId))
+      .returning();
+    return updated;
+  }
+
+  // Customer Orders
+  async getOrdersByCustomer(customerId: number): Promise<(OrderTicket & { items: OrderItem[] })[]> {
+    const orders = await db.select().from(orderTickets)
+      .where(eq(orderTickets.customerId, customerId))
+      .orderBy(desc(orderTickets.createdAt));
+    return Promise.all(orders.map(async (order) => {
+      const items = await this.getOrderItems(order.id);
+      return { ...order, items };
+    }));
   }
 
   // Analytics

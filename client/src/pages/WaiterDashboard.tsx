@@ -7,10 +7,11 @@ import OrderFilters from "@/components/orders/OrderFilters";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock, Check, Loader2 } from "lucide-react";
+import { Clock, Check, Loader2, Bell, CreditCard, DollarSign, CheckCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type OrderStatus = "new" | "in_progress" | "ready" | "delivered";
 
@@ -29,6 +30,14 @@ interface Order {
   status: OrderStatus;
   createdAt: string;
   paymentStatus?: string;
+}
+
+interface TableCall {
+  id: number;
+  tableNumber: number | null;
+  status: "pending" | "acknowledged" | "resolved";
+  createdAt: string;
+  acknowledgedAt?: string;
 }
 
 interface WaiterDashboardProps {
@@ -59,11 +68,17 @@ const statusLabels: Record<OrderStatus, string> = {
 
 export default function WaiterDashboard({ userName = "Waiter", onLogout }: WaiterDashboardProps) {
   const [activeFilter, setActiveFilter] = useState<"all" | OrderStatus>("all");
+  const [activeTab, setActiveTab] = useState<"orders" | "calls">("orders");
   const { toast } = useToast();
 
   const { data: orders = [], isLoading } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
     refetchInterval: 5000,
+  });
+
+  const { data: tableCalls = [], isLoading: isLoadingCalls } = useQuery<TableCall[]>({
+    queryKey: ["/api/table-calls"],
+    refetchInterval: 3000,
   });
 
   const updateStatusMutation = useMutation({
@@ -80,12 +95,69 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
     },
   });
 
+  const updatePaymentMutation = useMutation({
+    mutationFn: async ({ orderId, paymentStatus }: { orderId: string; paymentStatus: string }) => {
+      const res = await apiRequest("PATCH", `/api/orders/${orderId}/payment`, { paymentStatus });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Payment Processed", description: "Order has been marked as paid" });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const acknowledgeCallMutation = useMutation({
+    mutationFn: async (callId: number) => {
+      const res = await apiRequest("PATCH", `/api/table-calls/${callId}/acknowledge`, {});
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Call Acknowledged", description: "Customer has been notified" });
+      queryClient.invalidateQueries({ queryKey: ["/api/table-calls"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const resolveCallMutation = useMutation({
+    mutationFn: async (callId: number) => {
+      const res = await apiRequest("PATCH", `/api/table-calls/${callId}/resolve`, {});
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Call Resolved", description: "Table call has been resolved" });
+      queryClient.invalidateQueries({ queryKey: ["/api/table-calls"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
   const handleStatusChange = (orderId: string, newStatus: OrderStatus) => {
     updateStatusMutation.mutate({ orderId, status: newStatus });
   };
 
+  const handlePayment = (orderId: string) => {
+    updatePaymentMutation.mutate({ orderId, paymentStatus: "paid" });
+  };
+
+  const handleAcknowledgeCall = (callId: number) => {
+    acknowledgeCallMutation.mutate(callId);
+  };
+
+  const handleResolveCall = (callId: number) => {
+    resolveCallMutation.mutate(callId);
+  };
+
   const filteredOrders = orders.filter((order) => {
-    if (activeFilter === "all") return order.status !== "delivered";
+    if (activeFilter === "all") {
+      // Show all non-delivered orders, plus delivered orders with pending payment
+      return order.status !== "delivered" || order.paymentStatus !== "paid";
+    }
     return order.status === activeFilter;
   });
 
@@ -104,6 +176,7 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
   };
 
   const sidebarStyle = { "--sidebar-width": "16rem", "--sidebar-width-icon": "4rem" };
+  const pendingCalls = tableCalls.filter(c => c.status === "pending").length;
 
   return (
     <SidebarProvider style={sidebarStyle as React.CSSProperties}>
@@ -113,74 +186,164 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
           <header className="flex items-center justify-between gap-4 p-4 border-b">
             <div className="flex items-center gap-4">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <h1 className="text-xl font-bold">Orders</h1>
+              <h1 className="text-xl font-bold">Waiter Dashboard</h1>
             </div>
             <ThemeToggle />
           </header>
           <main className="flex-1 overflow-auto p-4">
-            <div className="mb-4">
-              <OrderFilters activeFilter={activeFilter} onFilterChange={setActiveFilter} counts={counts} />
-            </div>
-            {isLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredOrders.map((order) => (
-                  <Card key={order.id} className={cn("p-4 space-y-3", statusColors[order.status])}>
-                    <div className="flex items-start justify-between gap-2 flex-wrap">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-bold text-xl">#{order.orderNumber}</h3>
-                          <Badge variant={statusBadgeVariants[order.status]}>{statusLabels[order.status]}</Badge>
-                        </div>
-                        <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1 flex-wrap">
-                          <span>Table {order.tableNumber}</span>
-                          <div className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            <span>{getElapsedTime(order.createdAt)}</span>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "orders" | "calls")}>
+              <TabsList className="mb-4">
+                <TabsTrigger value="orders" data-testid="tab-orders">Orders</TabsTrigger>
+                <TabsTrigger value="calls" data-testid="tab-calls" className="relative">
+                  Table Calls
+                  {pendingCalls > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                      {pendingCalls}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="orders">
+                <div className="mb-4">
+                  <OrderFilters activeFilter={activeFilter} onFilterChange={setActiveFilter} counts={counts} />
+                </div>
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredOrders.map((order) => (
+                      <Card key={order.id} className={cn("p-4 space-y-3", statusColors[order.status])} data-testid={`card-order-${order.id}`}>
+                        <div className="flex items-start justify-between gap-2 flex-wrap">
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-bold text-xl">#{order.orderNumber}</h3>
+                              <Badge variant={statusBadgeVariants[order.status]}>{statusLabels[order.status]}</Badge>
+                            </div>
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1 flex-wrap">
+                              <span>Table {order.tableNumber}</span>
+                              <div className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                <span>{getElapsedTime(order.createdAt)}</span>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      </div>
-                      {order.paymentStatus && (
-                        <Badge variant={order.paymentStatus === "paid" ? "outline" : "secondary"}>
-                          {order.paymentStatus === "paid" ? "Paid" : "Pending"}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      {order.items.map((item) => (
-                        <div key={item.id} className="flex items-start gap-2">
-                          <span className="font-semibold text-sm min-w-[24px]">{item.quantity}x</span>
-                          <div className="flex-1">
-                            <span className="text-sm font-medium">{item.name}</span>
-                            {item.modifiers && item.modifiers.length > 0 && (
-                              <p className="text-xs text-muted-foreground italic">{item.modifiers.join(", ")}</p>
+                          <Badge variant={order.paymentStatus === "paid" ? "outline" : "secondary"}>
+                            {order.paymentStatus === "paid" ? (
+                              <><CheckCircle className="w-3 h-3 mr-1" />Paid</>
+                            ) : (
+                              <><DollarSign className="w-3 h-3 mr-1" />Pending</>
                             )}
-                          </div>
+                          </Badge>
                         </div>
-                      ))}
-                    </div>
-                    {order.status === "ready" && (
-                      <Button
-                        className="w-full"
-                        onClick={() => handleStatusChange(order.id, "delivered")}
-                        disabled={updateStatusMutation.isPending}
-                      >
-                        <Check className="w-4 h-4 mr-2" />
-                        Mark Delivered
-                      </Button>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            )}
-            {!isLoading && filteredOrders.length === 0 && (
-              <div className="text-center py-12 text-muted-foreground">
-                <p>No orders to display</p>
-              </div>
-            )}
+                        <div className="space-y-2">
+                          {order.items.map((item) => (
+                            <div key={item.id} className="flex items-start gap-2">
+                              <span className="font-semibold text-sm min-w-[24px]">{item.quantity}x</span>
+                              <div className="flex-1">
+                                <span className="text-sm font-medium">{item.name}</span>
+                                {item.modifiers && item.modifiers.length > 0 && (
+                                  <p className="text-xs text-muted-foreground italic">{item.modifiers.join(", ")}</p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          {order.status === "ready" && (
+                            <Button
+                              className="flex-1"
+                              onClick={() => handleStatusChange(order.id, "delivered")}
+                              disabled={updateStatusMutation.isPending}
+                              data-testid={`button-deliver-${order.id}`}
+                            >
+                              <Check className="w-4 h-4 mr-2" />
+                              Deliver
+                            </Button>
+                          )}
+                          {order.paymentStatus !== "paid" && order.status === "delivered" && (
+                            <Button
+                              variant="outline"
+                              className="flex-1"
+                              onClick={() => handlePayment(order.id)}
+                              disabled={updatePaymentMutation.isPending}
+                              data-testid={`button-payment-${order.id}`}
+                            >
+                              <CreditCard className="w-4 h-4 mr-2" />
+                              Process Payment
+                            </Button>
+                          )}
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+                {!isLoading && filteredOrders.length === 0 && (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <p>No orders to display</p>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="calls">
+                {isLoadingCalls ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : tableCalls.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Bell className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>No active table calls</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {tableCalls.map((call) => (
+                      <Card key={call.id} className={cn("p-4 space-y-3", call.status === "pending" ? "border-l-4 border-l-red-500" : "border-l-4 border-l-amber-500")} data-testid={`card-call-${call.id}`}>
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div>
+                            <h3 className="font-bold text-xl">Table {call.tableNumber || "N/A"}</h3>
+                            <div className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
+                              <Clock className="w-3 h-3" />
+                              <span>{getElapsedTime(call.createdAt)}</span>
+                            </div>
+                          </div>
+                          <Badge variant={call.status === "pending" ? "destructive" : "secondary"}>
+                            {call.status === "pending" ? "Waiting" : "Acknowledged"}
+                          </Badge>
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          {call.status === "pending" && (
+                            <Button
+                              className="flex-1"
+                              onClick={() => handleAcknowledgeCall(call.id)}
+                              disabled={acknowledgeCallMutation.isPending}
+                              data-testid={`button-acknowledge-${call.id}`}
+                            >
+                              <Bell className="w-4 h-4 mr-2" />
+                              Acknowledge
+                            </Button>
+                          )}
+                          {call.status === "acknowledged" && (
+                            <Button
+                              variant="outline"
+                              className="flex-1"
+                              onClick={() => handleResolveCall(call.id)}
+                              disabled={resolveCallMutation.isPending}
+                              data-testid={`button-resolve-${call.id}`}
+                            >
+                              <Check className="w-4 h-4 mr-2" />
+                              Resolve
+                            </Button>
+                          )}
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </main>
         </div>
       </div>

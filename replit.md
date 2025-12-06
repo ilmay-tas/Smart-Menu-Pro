@@ -94,8 +94,34 @@ Preferred communication style: Simple, everyday language.
 **Order Status Updates:**
 - Kitchen staff can update order status (new → in_progress → ready)
 - Waiter staff mark orders as delivered
-- Frontend uses query invalidation to refetch updated data
-- Potential for WebSocket integration for live updates (infrastructure present via http.Server)
+- Customers see real-time order status changes in their "My Orders" tab
+- Frontend uses TanStack Query with polling (3-5 second intervals) for real-time updates
+- Query invalidation used for immediate updates after mutations
+
+**Table Calls System:**
+- Customers can call a waiter via "Call Waiter" button
+- Table calls appear in waiter dashboard with pending/acknowledged/resolved status
+- Waiters acknowledge calls (customer notified) and resolve when attended
+- Call status tracked in database with timestamps and acknowledgment tracking
+
+**Payment Processing:**
+- Waiters/Owners can process payments for delivered orders
+- Payment status (pending/paid) visible across all staff dashboards
+- Role-based access control: only waiters and owners can process payments
+
+### Multi-Role Coordination
+
+**Cross-Role Visibility:**
+- Kitchen sees new orders immediately with status tracking
+- Waiters see order status changes from kitchen (new → in_progress → ready)
+- Customers track their order progress in real-time
+- Payment status visible to relevant staff roles
+
+**Role-Based Features:**
+- **Customer**: Browse menu, place orders, track order status, call waiter
+- **Kitchen Staff**: View orders by status, update preparation progress
+- **Waiter**: Deliver orders, process payments, respond to table calls
+- **Owner**: Full access to analytics plus waiter capabilities
 
 ## External Dependencies
 

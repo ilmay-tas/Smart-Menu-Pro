@@ -1,5 +1,6 @@
 import { db } from "./db";
-import { menuItems, modifiers, restaurantTables, categories } from "@shared/schema";
+import bcrypt from "bcryptjs";
+import { menuItems, modifiers, restaurantTables, categories, staff } from "@shared/schema";
 
 const categoryData = [
   { name: "Starters" },
@@ -131,6 +132,23 @@ export async function seedDatabase() {
   // Seed tables (1-12)
   for (let i = 1; i <= 12; i++) {
     await db.insert(restaurantTables).values({ tableNumber: i });
+  }
+
+  // Seed staff users
+  const staffData = [
+    { username: "kitchen1", password: "kitchen123", name: "Kitchen Staff", role: "kitchen" as const },
+    { username: "waiter1", password: "waiter123", name: "Waiter Staff", role: "waiter" as const },
+    { username: "owner1", password: "owner123", name: "Restaurant Owner", role: "owner" as const },
+  ];
+
+  for (const staffUser of staffData) {
+    const passwordHash = await bcrypt.hash(staffUser.password, 10);
+    await db.insert(staff).values({
+      username: staffUser.username,
+      passwordHash,
+      name: staffUser.name,
+      role: staffUser.role,
+    });
   }
 
   console.log("Database seeded successfully!");
