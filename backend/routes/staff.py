@@ -9,8 +9,8 @@ staff_bp = Blueprint('staff', __name__)
 @staff_bp.route('/', methods=['GET'])
 @jwt_required()
 def get_staff():
-    identity = get_jwt_identity()
-    user = User.query.get(identity['id'])
+    user_id = get_jwt_identity()
+    user = User.query.get(int(user_id))
     
     if not user or user.role != 'owner':
         return jsonify({'error': 'Only owners can view staff'}), 403
@@ -25,8 +25,8 @@ def get_staff():
 @staff_bp.route('/<int:staff_id>/approve', methods=['POST'])
 @jwt_required()
 def approve_staff(staff_id):
-    identity = get_jwt_identity()
-    user = User.query.get(identity['id'])
+    user_id = get_jwt_identity()
+    user = User.query.get(int(user_id))
     
     if not user or user.role != 'owner':
         return jsonify({'error': 'Only owners can approve staff'}), 403
@@ -50,8 +50,8 @@ def approve_staff(staff_id):
 @staff_bp.route('/<int:staff_id>/revoke', methods=['POST'])
 @jwt_required()
 def revoke_staff(staff_id):
-    identity = get_jwt_identity()
-    user = User.query.get(identity['id'])
+    user_id = get_jwt_identity()
+    user = User.query.get(int(user_id))
     
     if not user or user.role != 'owner':
         return jsonify({'error': 'Only owners can revoke staff access'}), 403

@@ -9,8 +9,8 @@ menu_bp = Blueprint('menu', __name__)
 @menu_bp.route('/', methods=['GET'])
 @jwt_required()
 def get_menu_items():
-    identity = get_jwt_identity()
-    user = User.query.get(identity['id'])
+    user_id = get_jwt_identity()
+    user = User.query.get(int(user_id))
     
     if not user or not user.restaurant_id:
         return jsonify({'error': 'User not found or not associated with a restaurant'}), 404
@@ -21,8 +21,8 @@ def get_menu_items():
 @menu_bp.route('/', methods=['POST'])
 @jwt_required()
 def create_menu_item():
-    identity = get_jwt_identity()
-    user = User.query.get(identity['id'])
+    user_id = get_jwt_identity()
+    user = User.query.get(int(user_id))
     
     if not user or user.role != 'owner':
         return jsonify({'error': 'Only owners can add menu items'}), 403
@@ -51,8 +51,8 @@ def create_menu_item():
 @menu_bp.route('/<int:item_id>', methods=['PUT'])
 @jwt_required()
 def update_menu_item(item_id):
-    identity = get_jwt_identity()
-    user = User.query.get(identity['id'])
+    user_id = get_jwt_identity()
+    user = User.query.get(int(user_id))
     
     if not user or user.role != 'owner':
         return jsonify({'error': 'Only owners can edit menu items'}), 403
@@ -81,8 +81,8 @@ def update_menu_item(item_id):
 @menu_bp.route('/<int:item_id>', methods=['DELETE'])
 @jwt_required()
 def delete_menu_item(item_id):
-    identity = get_jwt_identity()
-    user = User.query.get(identity['id'])
+    user_id = get_jwt_identity()
+    user = User.query.get(int(user_id))
     
     if not user or user.role != 'owner':
         return jsonify({'error': 'Only owners can delete menu items'}), 403

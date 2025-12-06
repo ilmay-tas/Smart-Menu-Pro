@@ -69,7 +69,7 @@ def signup():
     db.session.commit()
     
     if role == 'owner':
-        access_token = create_access_token(identity={'id': user.id, 'role': user.role})
+        access_token = create_access_token(identity=str(user.id))
         return jsonify({
             'message': 'Owner account created successfully',
             'user': user.to_dict(),
@@ -105,7 +105,7 @@ def login():
             'pending': True
         }), 403
     
-    access_token = create_access_token(identity={'id': user.id, 'role': user.role})
+    access_token = create_access_token(identity=str(user.id))
     
     return jsonify({
         'message': 'Login successful',
@@ -116,8 +116,8 @@ def login():
 @auth_bp.route('/me', methods=['GET'])
 @jwt_required()
 def get_current_user():
-    identity = get_jwt_identity()
-    user = User.query.get(identity['id'])
+    user_id = get_jwt_identity()
+    user = User.query.get(int(user_id))
     
     if not user:
         return jsonify({'error': 'User not found'}), 404

@@ -33,8 +33,8 @@ async function verifyPassword(password: string, hash: string): Promise<boolean> 
 }
 
 export async function registerRoutes(app: Express, httpServer: Server): Promise<void> {
-  // Seed database on startup
-  await seedDatabase();
+  // Seeding disabled - using Flask backend for database management
+  // await seedDatabase();
 
   // Session middleware
   app.use(
