@@ -2,48 +2,9 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { createProxyMiddleware } from "http-proxy-middleware";
-import { spawn } from "child_process";
-import path from "path";
 
 const app = express();
 const httpServer = createServer(app);
-
-// Start Flask backend
-const flaskPath = path.join(process.cwd(), 'backend');
-const flaskProcess = spawn('python', ['app.py'], {
-  cwd: flaskPath,
-  stdio: ['inherit', 'pipe', 'pipe'],
-  env: { ...process.env }
-});
-
-flaskProcess.stdout?.on('data', (data) => {
-  console.log(`[Flask] ${data.toString().trim()}`);
-});
-
-flaskProcess.stderr?.on('data', (data) => {
-  console.log(`[Flask] ${data.toString().trim()}`);
-});
-
-flaskProcess.on('error', (err) => {
-  console.error('[Flask] Failed to start:', err.message);
-});
-
-flaskProcess.on('exit', (code) => {
-  console.log(`[Flask] Process exited with code ${code}`);
-});
-
-// Wait briefly for Flask to start, then setup proxy
-setTimeout(() => {
-  console.log('[Flask] Proxy ready');
-}, 2000);
-
-// Proxy /api requests to Flask backend
-app.use('/api', createProxyMiddleware({
-  target: 'http://localhost:5001',
-  changeOrigin: true,
-  pathRewrite: (path) => '/api' + path,
-}));
 
 declare module "http" {
   interface IncomingMessage {
