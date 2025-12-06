@@ -1,76 +1,87 @@
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import StaffSidebar from "@/components/layout/StaffSidebar";
 import ThemeToggle from "@/components/layout/ThemeToggle";
-import OrderTicket, { type Order, type OrderStatus } from "@/components/orders/OrderTicket";
 import OrderFilters from "@/components/orders/OrderFilters";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Clock, Check, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
-// todo: remove mock functionality - replace with API data and WebSocket
-const initialOrders: Order[] = [
-  {
-    id: "order-1",
-    orderNumber: "042",
-    tableNumber: "7",
-    status: "in_progress",
-    createdAt: new Date(Date.now() - 5 * 60 * 1000),
-    items: [
-      { id: "item-1", name: "Classic Beef Burger", quantity: 2 },
-      { id: "item-2", name: "Caesar Salad", quantity: 1 },
-    ],
-    paymentStatus: "paid",
-  },
-  {
-    id: "order-2",
-    orderNumber: "043",
-    tableNumber: "3",
-    status: "ready",
-    createdAt: new Date(Date.now() - 12 * 60 * 1000),
-    items: [
-      { id: "item-3", name: "Grilled Salmon", quantity: 1 },
-      { id: "item-4", name: "Margherita Pizza", quantity: 1 },
-    ],
-    paymentStatus: "pending",
-  },
-  {
-    id: "order-3",
-    orderNumber: "044",
-    tableNumber: "12",
-    status: "ready",
-    createdAt: new Date(Date.now() - 3 * 60 * 1000),
-    items: [
-      { id: "item-5", name: "Pasta Carbonara", quantity: 2 },
-    ],
-    paymentStatus: "paid",
-  },
-];
+type OrderStatus = "new" | "in_progress" | "ready" | "delivered";
+
+interface OrderItem {
+  id: string;
+  name: string;
+  quantity: number;
+  modifiers?: string[] | null;
+}
+
+interface Order {
+  id: string;
+  orderNumber: string;
+  tableNumber: string;
+  items: OrderItem[];
+  status: OrderStatus;
+  createdAt: string;
+  paymentStatus?: string;
+}
 
 interface WaiterDashboardProps {
   userName?: string;
   onLogout: () => void;
 }
 
-export default function WaiterDashboard({
-  userName = "Waiter",
-  onLogout,
-}: WaiterDashboardProps) {
-  const [orders, setOrders] = useState<Order[]>(initialOrders);
+const statusColors: Record<OrderStatus, string> = {
+  new: "border-l-4 border-l-blue-500",
+  in_progress: "border-l-4 border-l-amber-500",
+  ready: "border-l-4 border-l-green-500",
+  delivered: "border-l-4 border-l-gray-400",
+};
+
+const statusBadgeVariants: Record<OrderStatus, "default" | "secondary" | "outline"> = {
+  new: "default",
+  in_progress: "secondary",
+  ready: "outline",
+  delivered: "secondary",
+};
+
+const statusLabels: Record<OrderStatus, string> = {
+  new: "New",
+  in_progress: "In Progress",
+  ready: "Ready",
+  delivered: "Delivered",
+};
+
+export default function WaiterDashboard({ userName = "Waiter", onLogout }: WaiterDashboardProps) {
   const [activeFilter, setActiveFilter] = useState<"all" | OrderStatus>("all");
   const { toast } = useToast();
 
-  const handleStatusChange = (orderId: string, newStatus: OrderStatus) => {
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === orderId ? { ...order, status: newStatus } : order
-      )
-    );
+  const { data: orders = [], isLoading } = useQuery<Order[]>({
+    queryKey: ["/api/orders"],
+    refetchInterval: 5000,
+  });
 
-    if (newStatus === "delivered") {
-      toast({
-        title: "Order Delivered",
-        description: "Order has been marked as delivered",
-      });
-    }
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ orderId, status }: { orderId: string; status: OrderStatus }) => {
+      const res = await apiRequest("PATCH", `/api/orders/${orderId}/status`, { status });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Order Delivered", description: "Order has been marked as delivered" });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleStatusChange = (orderId: string, newStatus: OrderStatus) => {
+    updateStatusMutation.mutate({ orderId, status: newStatus });
   };
 
   const filteredOrders = orders.filter((order) => {
@@ -85,10 +96,14 @@ export default function WaiterDashboard({
     delivered: orders.filter((o) => o.status === "delivered").length,
   };
 
-  const sidebarStyle = {
-    "--sidebar-width": "16rem",
-    "--sidebar-width-icon": "4rem",
+  const getElapsedTime = (createdAt: string) => {
+    const diff = Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000);
+    if (diff < 1) return "Just now";
+    if (diff === 1) return "1 min ago";
+    return `${diff} mins ago`;
   };
+
+  const sidebarStyle = { "--sidebar-width": "16rem", "--sidebar-width-icon": "4rem" };
 
   return (
     <SidebarProvider style={sidebarStyle as React.CSSProperties}>
@@ -104,24 +119,64 @@ export default function WaiterDashboard({
           </header>
           <main className="flex-1 overflow-auto p-4">
             <div className="mb-4">
-              <OrderFilters
-                activeFilter={activeFilter}
-                onFilterChange={setActiveFilter}
-                counts={counts}
-              />
+              <OrderFilters activeFilter={activeFilter} onFilterChange={setActiveFilter} counts={counts} />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredOrders.map((order) => (
-                <OrderTicket
-                  key={order.id}
-                  order={order}
-                  onStatusChange={handleStatusChange}
-                  showPaymentStatus={true}
-                  variant="waiter"
-                />
-              ))}
-            </div>
-            {filteredOrders.length === 0 && (
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredOrders.map((order) => (
+                  <Card key={order.id} className={cn("p-4 space-y-3", statusColors[order.status])}>
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-xl">#{order.orderNumber}</h3>
+                          <Badge variant={statusBadgeVariants[order.status]}>{statusLabels[order.status]}</Badge>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1 flex-wrap">
+                          <span>Table {order.tableNumber}</span>
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            <span>{getElapsedTime(order.createdAt)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      {order.paymentStatus && (
+                        <Badge variant={order.paymentStatus === "paid" ? "outline" : "secondary"}>
+                          {order.paymentStatus === "paid" ? "Paid" : "Pending"}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {order.items.map((item) => (
+                        <div key={item.id} className="flex items-start gap-2">
+                          <span className="font-semibold text-sm min-w-[24px]">{item.quantity}x</span>
+                          <div className="flex-1">
+                            <span className="text-sm font-medium">{item.name}</span>
+                            {item.modifiers && item.modifiers.length > 0 && (
+                              <p className="text-xs text-muted-foreground italic">{item.modifiers.join(", ")}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {order.status === "ready" && (
+                      <Button
+                        className="w-full"
+                        onClick={() => handleStatusChange(order.id, "delivered")}
+                        disabled={updateStatusMutation.isPending}
+                      >
+                        <Check className="w-4 h-4 mr-2" />
+                        Mark Delivered
+                      </Button>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            )}
+            {!isLoading && filteredOrders.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
                 <p>No orders to display</p>
               </div>

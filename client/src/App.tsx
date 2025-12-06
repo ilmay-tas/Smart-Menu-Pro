@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Switch, Route } from "wouter";
-import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "./lib/queryClient";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -12,84 +12,111 @@ import WaiterDashboard from "@/pages/WaiterDashboard";
 import OwnerDashboard from "@/pages/OwnerDashboard";
 import NotFound from "@/pages/not-found";
 
-import { type UserRole } from "@/components/auth/AuthForm";
+type UserRole = "customer" | "waiter" | "kitchen" | "owner";
 
-function App() {
-  // todo: remove mock functionality - implement real authentication state
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userRole, setUserRole] = useState<UserRole>("customer");
-  const [userName, setUserName] = useState("");
+interface User {
+  id: string;
+  name: string;
+  phone: string;
+  role: UserRole;
+}
 
-  const handleLogin = (role: UserRole, name: string) => {
-    setUserRole(role);
-    setUserName(name);
-    setIsAuthenticated(true);
+function AppContent() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const data = await res.json();
+          setUser(data.user);
+        }
+      } catch (error) {
+        console.error("Auth check failed:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    checkAuth();
+  }, []);
+
+  const handleLogin = (loggedInUser: User) => {
+    setUser(loggedInUser);
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setUserRole("customer");
-    setUserName("");
+  const handleLogout = async () => {
+    try {
+      await apiRequest("POST", "/api/auth/signout");
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+    setUser(null);
+    queryClient.clear();
   };
 
-  if (!isAuthenticated) {
+  if (isLoading) {
     return (
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <Toaster />
-          <AuthPage onLogin={handleLogin} />
-        </TooltipProvider>
-      </QueryClientProvider>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      </div>
     );
   }
 
+  if (!user) {
+    return <AuthPage onLogin={handleLogin} />;
+  }
+
   const renderDashboard = () => {
-    switch (userRole) {
+    switch (user.role) {
       case "customer":
         return (
           <CustomerMenu
             tableNumber="12"
-            userName={userName}
+            userName={user.name}
             onLogout={handleLogout}
           />
         );
       case "kitchen":
         return (
-          <KitchenDashboard userName={userName} onLogout={handleLogout} />
+          <KitchenDashboard userName={user.name} onLogout={handleLogout} />
         );
       case "waiter":
-        return <WaiterDashboard userName={userName} onLogout={handleLogout} />;
+        return <WaiterDashboard userName={user.name} onLogout={handleLogout} />;
       case "owner":
-        return <OwnerDashboard userName={userName} onLogout={handleLogout} />;
+        return <OwnerDashboard userName={user.name} onLogout={handleLogout} />;
       default:
         return <NotFound />;
     }
   };
 
   return (
+    <Switch>
+      <Route path="/" component={() => renderDashboard()} />
+      <Route path="/menu" component={() => (
+        <CustomerMenu tableNumber="12" userName={user.name} onLogout={handleLogout} />
+      )} />
+      <Route path="/kitchen" component={() => (
+        <KitchenDashboard userName={user.name} onLogout={handleLogout} />
+      )} />
+      <Route path="/waiter" component={() => (
+        <WaiterDashboard userName={user.name} onLogout={handleLogout} />
+      )} />
+      <Route path="/dashboard" component={() => (
+        <OwnerDashboard userName={user.name} onLogout={handleLogout} />
+      )} />
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
+function App() {
+  return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Switch>
-          <Route path="/" component={() => renderDashboard()} />
-          <Route path="/menu" component={() => (
-            <CustomerMenu
-              tableNumber="12"
-              userName={userName}
-              onLogout={handleLogout}
-            />
-          )} />
-          <Route path="/kitchen" component={() => (
-            <KitchenDashboard userName={userName} onLogout={handleLogout} />
-          )} />
-          <Route path="/waiter" component={() => (
-            <WaiterDashboard userName={userName} onLogout={handleLogout} />
-          )} />
-          <Route path="/dashboard" component={() => (
-            <OwnerDashboard userName={userName} onLogout={handleLogout} />
-          )} />
-          <Route component={NotFound} />
-        </Switch>
+        <AppContent />
       </TooltipProvider>
     </QueryClientProvider>
   );

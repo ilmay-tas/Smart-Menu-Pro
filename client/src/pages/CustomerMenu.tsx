@@ -1,94 +1,46 @@
 import { useState, useMemo } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import CustomerHeader from "@/components/layout/CustomerHeader";
-import MenuItemCard, { type MenuItem } from "@/components/menu/MenuItemCard";
 import DietaryFilters, { type DietaryFilter } from "@/components/menu/DietaryFilters";
 import CategoryTabs from "@/components/menu/CategoryTabs";
 import CartButton from "@/components/cart/CartButton";
 import CartSheet from "@/components/cart/CartSheet";
 import { type CartItemData } from "@/components/cart/CartItem";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Plus, Minus, Leaf, WheatOff, Flame, Loader2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
-import burgerImage from "@assets/generated_images/gourmet_beef_burger_photo.png";
-import pastaImage from "@assets/generated_images/creamy_pasta_carbonara_photo.png";
-import saladImage from "@assets/generated_images/fresh_caesar_salad_photo.png";
-import salmonImage from "@assets/generated_images/grilled_salmon_fillet_photo.png";
-import cakeImage from "@assets/generated_images/chocolate_lava_cake_dessert.png";
-import pizzaImage from "@assets/generated_images/margherita_pizza_photo.png";
+interface MenuModifier {
+  id: string;
+  name: string;
+  price: string;
+}
 
-// todo: remove mock functionality - replace with API data
-const mockMenuItems: MenuItem[] = [
-  {
-    id: "1",
-    name: "Classic Beef Burger",
-    description: "Juicy beef patty with melted cheese, fresh lettuce, tomato, and our special sauce",
-    price: 14.99,
-    image: burgerImage,
-    category: "Mains",
-    allergens: ["Gluten", "Dairy"],
-    modifiers: [
-      { id: "extra-cheese", name: "Extra Cheese", price: 1.50 },
-      { id: "bacon", name: "Add Bacon", price: 2.00 },
-    ],
-  },
-  {
-    id: "2",
-    name: "Pasta Carbonara",
-    description: "Creamy pasta with crispy bacon, parmesan cheese, and fresh parsley",
-    price: 16.99,
-    image: pastaImage,
-    category: "Mains",
-    allergens: ["Gluten", "Dairy", "Eggs"],
-    modifiers: [
-      { id: "extra-bacon", name: "Extra Bacon", price: 2.50 },
-    ],
-  },
-  {
-    id: "3",
-    name: "Caesar Salad",
-    description: "Fresh romaine lettuce with croutons, parmesan, and creamy Caesar dressing",
-    price: 11.99,
-    image: saladImage,
-    category: "Starters",
-    isGlutenFree: true,
-    allergens: ["Dairy", "Fish"],
-    modifiers: [
-      { id: "grilled-chicken", name: "Add Grilled Chicken", price: 4.00 },
-    ],
-  },
-  {
-    id: "4",
-    name: "Grilled Salmon",
-    description: "Fresh Atlantic salmon with lemon butter sauce and seasonal vegetables",
-    price: 22.99,
-    image: salmonImage,
-    category: "Mains",
-    isGlutenFree: true,
-    allergens: ["Fish", "Dairy"],
-  },
-  {
-    id: "5",
-    name: "Chocolate Lava Cake",
-    description: "Warm chocolate cake with molten center, served with vanilla ice cream",
-    price: 8.99,
-    image: cakeImage,
-    category: "Desserts",
-    allergens: ["Gluten", "Dairy", "Eggs"],
-  },
-  {
-    id: "6",
-    name: "Margherita Pizza",
-    description: "Classic pizza with fresh mozzarella, tomato sauce, and basil",
-    price: 15.99,
-    image: pizzaImage,
-    category: "Mains",
-    isVegan: false,
-    allergens: ["Gluten", "Dairy"],
-    modifiers: [
-      { id: "extra-mozzarella", name: "Extra Mozzarella", price: 2.00 },
-      { id: "olives", name: "Add Olives", price: 1.00 },
-    ],
-  },
-];
+interface MenuItem {
+  id: string;
+  name: string;
+  description: string;
+  price: string;
+  image: string;
+  category: string;
+  isVegan: boolean | null;
+  isGlutenFree: boolean | null;
+  isSpicy: boolean | null;
+  allergens: string[] | null;
+  modifiers: MenuModifier[];
+}
 
 interface CustomerMenuProps {
   tableNumber?: string;
@@ -105,56 +57,75 @@ export default function CustomerMenu({
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [cartItems, setCartItems] = useState<CartItemData[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const [selectedModifiers, setSelectedModifiers] = useState<string[]>([]);
   const { toast } = useToast();
 
+  const { data: menuItems = [], isLoading } = useQuery<MenuItem[]>({
+    queryKey: ["/api/menu"],
+  });
+
+  const createOrderMutation = useMutation({
+    mutationFn: async (orderData: { tableNumber: string; items: any[] }) => {
+      const res = await apiRequest("POST", "/api/orders", orderData);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Order Placed!", description: "Your order has been sent to the kitchen" });
+      setCartItems([]);
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
   const categories = useMemo(() => {
-    const cats = new Set(mockMenuItems.map((item) => item.category));
+    const cats = new Set(menuItems.map((item) => item.category));
     return ["All", ...Array.from(cats)];
-  }, []);
+  }, [menuItems]);
 
   const filteredItems = useMemo(() => {
-    return mockMenuItems.filter((item) => {
-      if (activeCategory !== "All" && item.category !== activeCategory) {
-        return false;
-      }
+    return menuItems.filter((item) => {
+      if (activeCategory !== "All" && item.category !== activeCategory) return false;
       if (activeFilter === "vegan" && !item.isVegan) return false;
       if (activeFilter === "glutenFree" && !item.isGlutenFree) return false;
       if (activeFilter === "spicy" && !item.isSpicy) return false;
       return true;
     });
-  }, [activeFilter, activeCategory]);
+  }, [menuItems, activeFilter, activeCategory]);
 
-  const handleAddToCart = (
-    item: MenuItem,
-    quantity: number,
-    modifiers: string[]
-  ) => {
-    const modifierDetails = item.modifiers?.filter((m) =>
-      modifiers.includes(m.id)
+  const handleAddToCart = () => {
+    if (!selectedItem) return;
+
+    const modifierDetails = selectedItem.modifiers?.filter((m) =>
+      selectedModifiers.includes(m.id)
     ) || [];
-    const modifierTotal = modifierDetails.reduce((sum, m) => sum + m.price, 0);
+    const modifierTotal = modifierDetails.reduce((sum, m) => sum + parseFloat(m.price), 0);
+    const itemPrice = parseFloat(selectedItem.price) + modifierTotal;
 
     const newCartItem: CartItemData = {
-      id: `${item.id}-${Date.now()}`,
-      menuItemId: item.id,
-      name: item.name,
-      price: item.price + modifierTotal,
+      id: `${selectedItem.id}-${Date.now()}`,
+      menuItemId: selectedItem.id,
+      name: selectedItem.name,
+      price: itemPrice,
       quantity,
-      image: item.image,
-      modifiers,
+      image: selectedItem.image,
+      modifiers: selectedModifiers,
       modifierNames: modifierDetails.map((m) => m.name),
     };
 
     setCartItems((prev) => [...prev, newCartItem]);
-    toast({
-      title: "Added to cart",
-      description: `${quantity}x ${item.name} added`,
-    });
+    toast({ title: "Added to cart", description: `${quantity}x ${selectedItem.name} added` });
+    setSelectedItem(null);
+    setQuantity(1);
+    setSelectedModifiers([]);
   };
 
-  const handleUpdateQuantity = (id: string, quantity: number) => {
+  const handleUpdateQuantity = (id: string, newQuantity: number) => {
     setCartItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, quantity } : item))
+      prev.map((item) => (item.id === id ? { ...item, quantity: newQuantity } : item))
     );
   };
 
@@ -163,47 +134,93 @@ export default function CustomerMenu({
   };
 
   const handleCheckout = () => {
-    toast({
-      title: "Order Placed!",
-      description: "Your order has been sent to the kitchen",
-    });
-    setCartItems([]);
-    // todo: remove mock functionality - send order to API
+    const orderItems = cartItems.map((item) => ({
+      menuItemId: item.menuItemId,
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+      modifiers: item.modifierNames,
+    }));
+
+    createOrderMutation.mutate({ tableNumber, items: orderItems });
   };
 
-  const cartTotal = cartItems.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  );
+  const toggleModifier = (modifierId: string) => {
+    setSelectedModifiers((prev) =>
+      prev.includes(modifierId)
+        ? prev.filter((id) => id !== modifierId)
+        : [...prev, modifierId]
+    );
+  };
+
+  const calculateTotal = () => {
+    if (!selectedItem) return 0;
+    let total = parseFloat(selectedItem.price) * quantity;
+    if (selectedItem.modifiers) {
+      selectedItem.modifiers
+        .filter((m) => selectedModifiers.includes(m.id))
+        .forEach((m) => {
+          total += parseFloat(m.price) * quantity;
+        });
+    }
+    return total;
+  };
+
+  const cartTotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const cartItemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background pb-24">
-      <CustomerHeader
-        tableNumber={tableNumber}
-        userName={userName}
-        onLogout={onLogout}
-      />
+      <CustomerHeader tableNumber={tableNumber} userName={userName} onLogout={onLogout} />
 
       <div className="px-4 py-4 space-y-4">
-        <DietaryFilters
-          activeFilter={activeFilter}
-          onFilterChange={setActiveFilter}
-        />
-
-        <CategoryTabs
-          categories={categories}
-          activeCategory={activeCategory}
-          onCategoryChange={setActiveCategory}
-        />
+        <DietaryFilters activeFilter={activeFilter} onFilterChange={setActiveFilter} />
+        <CategoryTabs categories={categories} activeCategory={activeCategory} onCategoryChange={setActiveCategory} />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredItems.map((item) => (
-            <MenuItemCard
+            <Card
               key={item.id}
-              item={item}
-              onAddToCart={handleAddToCart}
-            />
+              className="overflow-hidden hover-elevate active-elevate-2 cursor-pointer"
+              onClick={() => setSelectedItem(item)}
+              data-testid={`card-menu-item-${item.id}`}
+            >
+              <div className="aspect-square overflow-hidden">
+                <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+              </div>
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-2 flex-wrap">
+                  <h3 className="font-semibold text-base">{item.name}</h3>
+                  <span className="font-bold text-base">${parseFloat(item.price).toFixed(2)}</span>
+                </div>
+                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{item.description}</p>
+                <div className="flex gap-1 mt-2 flex-wrap">
+                  {item.isVegan && (
+                    <Badge variant="secondary" className="text-xs">
+                      <Leaf className="w-3 h-3 mr-1" /> Vegan
+                    </Badge>
+                  )}
+                  {item.isGlutenFree && (
+                    <Badge variant="secondary" className="text-xs">
+                      <WheatOff className="w-3 h-3 mr-1" /> GF
+                    </Badge>
+                  )}
+                  {item.isSpicy && (
+                    <Badge variant="secondary" className="text-xs">
+                      <Flame className="w-3 h-3 mr-1" /> Spicy
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </Card>
           ))}
         </div>
 
@@ -214,11 +231,7 @@ export default function CustomerMenu({
         )}
       </div>
 
-      <CartButton
-        itemCount={cartItemCount}
-        total={cartTotal * 1.1}
-        onClick={() => setIsCartOpen(true)}
-      />
+      <CartButton itemCount={cartItemCount} total={cartTotal * 1.1} onClick={() => setIsCartOpen(true)} />
 
       <CartSheet
         isOpen={isCartOpen}
@@ -229,6 +242,62 @@ export default function CustomerMenu({
         onCheckout={handleCheckout}
         tableNumber={tableNumber}
       />
+
+      <Dialog open={!!selectedItem} onOpenChange={() => setSelectedItem(null)}>
+        <DialogContent className="max-w-md">
+          {selectedItem && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{selectedItem.name}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="aspect-video overflow-hidden rounded-lg">
+                  <img src={selectedItem.image} alt={selectedItem.name} className="w-full h-full object-cover" />
+                </div>
+                <p className="text-muted-foreground">{selectedItem.description}</p>
+                {selectedItem.allergens && selectedItem.allergens.length > 0 && (
+                  <div className="text-sm">
+                    <span className="font-medium">Allergens: </span>
+                    <span className="text-muted-foreground">{selectedItem.allergens.join(", ")}</span>
+                  </div>
+                )}
+                {selectedItem.modifiers && selectedItem.modifiers.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="font-medium text-sm">Customize:</span>
+                    {selectedItem.modifiers.map((modifier) => (
+                      <div key={modifier.id} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id={modifier.id}
+                            checked={selectedModifiers.includes(modifier.id)}
+                            onCheckedChange={() => toggleModifier(modifier.id)}
+                          />
+                          <Label htmlFor={modifier.id} className="cursor-pointer">{modifier.name}</Label>
+                        </div>
+                        <span className="text-sm text-muted-foreground">+${parseFloat(modifier.price).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center justify-center gap-4">
+                  <Button size="icon" variant="outline" onClick={() => setQuantity(Math.max(1, quantity - 1))}>
+                    <Minus className="w-4 h-4" />
+                  </Button>
+                  <span className="text-xl font-semibold w-8 text-center">{quantity}</span>
+                  <Button size="icon" variant="outline" onClick={() => setQuantity(quantity + 1)}>
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button className="w-full" onClick={handleAddToCart}>
+                  Add to Cart - ${calculateTotal().toFixed(2)}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

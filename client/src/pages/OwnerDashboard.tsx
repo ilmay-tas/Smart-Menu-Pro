@@ -1,74 +1,79 @@
+import { useQuery } from "@tanstack/react-query";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import StaffSidebar from "@/components/layout/StaffSidebar";
 import ThemeToggle from "@/components/layout/ThemeToggle";
 import KPICard from "@/components/dashboard/KPICard";
 import TopSellingChart from "@/components/dashboard/TopSellingChart";
 import SalesChart from "@/components/dashboard/SalesChart";
-import { DollarSign, ShoppingCart, Users, TrendingUp } from "lucide-react";
+import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2 } from "lucide-react";
 
-// todo: remove mock functionality - replace with API data
-const mockKPIs = [
-  {
-    title: "Total Revenue",
-    value: "$12,450",
-    icon: <DollarSign className="w-6 h-6" />,
-    trend: { value: 12.5, isPositive: true },
-    subtitle: "vs last week",
-  },
-  {
-    title: "Total Orders",
-    value: "342",
-    icon: <ShoppingCart className="w-6 h-6" />,
-    trend: { value: 8.2, isPositive: true },
-    subtitle: "vs last week",
-  },
-  {
-    title: "Active Tables",
-    value: "18/24",
-    icon: <Users className="w-6 h-6" />,
-    trend: { value: 5, isPositive: true },
-    subtitle: "occupancy",
-  },
-  {
-    title: "Avg. Order Value",
-    value: "$36.40",
-    icon: <TrendingUp className="w-6 h-6" />,
-    trend: { value: 3.1, isPositive: true },
-    subtitle: "vs last week",
-  },
-];
+interface AnalyticsSummary {
+  totalRevenue: number;
+  totalOrders: number;
+  activeOrders: number;
+  occupiedTables: number;
+  totalTables: number;
+  avgOrderValue: number;
+}
 
-const mockTopSelling = [
-  { name: "Beef Burger", orders: 89, revenue: 1334.11 },
-  { name: "Pasta Carbonara", orders: 67, revenue: 1138.33 },
-  { name: "Grilled Salmon", orders: 54, revenue: 1241.46 },
-  { name: "Caesar Salad", orders: 48, revenue: 575.52 },
-  { name: "Margherita Pizza", orders: 42, revenue: 671.58 },
-];
+interface TopSellingItem {
+  name: string;
+  orders: number;
+  revenue: number;
+}
 
-const mockSalesData = [
-  { date: "Mon", revenue: 1450, orders: 42 },
-  { date: "Tue", revenue: 1820, orders: 51 },
-  { date: "Wed", revenue: 1650, orders: 48 },
-  { date: "Thu", revenue: 2100, orders: 58 },
-  { date: "Fri", revenue: 2450, orders: 68 },
-  { date: "Sat", revenue: 2980, orders: 82 },
-  { date: "Sun", revenue: 2200, orders: 61 },
-];
+interface SalesDataPoint {
+  date: string;
+  revenue: number;
+  orders: number;
+}
 
 interface OwnerDashboardProps {
   userName?: string;
   onLogout: () => void;
 }
 
-export default function OwnerDashboard({
-  userName = "Restaurant Owner",
-  onLogout,
-}: OwnerDashboardProps) {
-  const sidebarStyle = {
-    "--sidebar-width": "16rem",
-    "--sidebar-width-icon": "4rem",
-  };
+export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout }: OwnerDashboardProps) {
+  const { data: summary, isLoading: summaryLoading } = useQuery<AnalyticsSummary>({
+    queryKey: ["/api/analytics/summary"],
+  });
+
+  const { data: topSelling = [], isLoading: topSellingLoading } = useQuery<TopSellingItem[]>({
+    queryKey: ["/api/analytics/top-selling"],
+  });
+
+  const { data: salesData = [], isLoading: salesLoading } = useQuery<SalesDataPoint[]>({
+    queryKey: ["/api/analytics/daily-revenue"],
+  });
+
+  const isLoading = summaryLoading || topSellingLoading || salesLoading;
+
+  const kpis = summary
+    ? [
+        {
+          title: "Total Revenue",
+          value: `$${summary.totalRevenue.toFixed(2)}`,
+          icon: <DollarSign className="w-6 h-6" />,
+        },
+        {
+          title: "Total Orders",
+          value: String(summary.totalOrders),
+          icon: <ShoppingCart className="w-6 h-6" />,
+        },
+        {
+          title: "Active Tables",
+          value: `${summary.occupiedTables}/${summary.totalTables}`,
+          icon: <Users className="w-6 h-6" />,
+        },
+        {
+          title: "Avg. Order Value",
+          value: `$${summary.avgOrderValue.toFixed(2)}`,
+          icon: <TrendingUp className="w-6 h-6" />,
+        },
+      ]
+    : [];
+
+  const sidebarStyle = { "--sidebar-width": "16rem", "--sidebar-width-icon": "4rem" };
 
   return (
     <SidebarProvider style={sidebarStyle as React.CSSProperties}>
@@ -83,16 +88,37 @@ export default function OwnerDashboard({
             <ThemeToggle />
           </header>
           <main className="flex-1 overflow-auto p-4 space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {mockKPIs.map((kpi) => (
-                <KPICard key={kpi.title} {...kpi} />
-              ))}
-            </div>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {kpis.map((kpi) => (
+                    <KPICard key={kpi.title} {...kpi} />
+                  ))}
+                </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <SalesChart data={mockSalesData} title="Weekly Sales Overview" />
-              <TopSellingChart items={mockTopSelling} />
-            </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <SalesChart
+                    data={salesData.length > 0 ? salesData : [
+                      { date: "Mon", revenue: 0, orders: 0 },
+                      { date: "Tue", revenue: 0, orders: 0 },
+                      { date: "Wed", revenue: 0, orders: 0 },
+                      { date: "Thu", revenue: 0, orders: 0 },
+                      { date: "Fri", revenue: 0, orders: 0 },
+                      { date: "Sat", revenue: 0, orders: 0 },
+                      { date: "Sun", revenue: 0, orders: 0 },
+                    ]}
+                    title="Weekly Sales Overview"
+                  />
+                  <TopSellingChart
+                    items={topSelling.length > 0 ? topSelling : [{ name: "No data yet", orders: 0, revenue: 0 }]}
+                  />
+                </div>
+              </>
+            )}
           </main>
         </div>
       </div>
