@@ -1,6 +1,6 @@
 import { db } from "./db";
 import bcrypt from "bcryptjs";
-import { menuItems, modifiers, restaurantTables, categories, staff } from "@shared/schema";
+import { menuItems, modifiers, restaurantTables, categories, staff, restaurants } from "@shared/schema";
 
 const categoryData = [
   { name: "Starters" },
@@ -141,13 +141,31 @@ export async function seedDatabase() {
     { username: "owner1", password: "owner123", name: "Restaurant Owner", role: "owner" as const },
   ];
 
+  let ownerId: number | null = null;
   for (const staffUser of staffData) {
     const passwordHash = await bcrypt.hash(staffUser.password, 10);
-    await db.insert(staff).values({
+    const [created] = await db.insert(staff).values({
       username: staffUser.username,
       passwordHash,
       name: staffUser.name,
       role: staffUser.role,
+    }).returning();
+    
+    if (staffUser.role === "owner") {
+      ownerId = created.id;
+    }
+  }
+
+  // Seed default restaurant for owner
+  if (ownerId) {
+    await db.insert(restaurants).values({
+      name: "MyDine Restaurant",
+      address: "123 Main Street, Foodville, CA 90210",
+      phone: "(555) 123-4567",
+      email: "info@mydine.com",
+      description: "A wonderful dining experience with great food and service",
+      ownerId: ownerId,
+      isActive: true,
     });
   }
 

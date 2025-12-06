@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient, apiRequest } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -122,6 +122,7 @@ function AppContent() {
   return (
     <Switch>
       <Route path="/" component={() => renderStaffDashboard()} />
+      <Route path="/staff-login">{() => <Redirect to="/" />}</Route>
       <Route path="/kitchen" component={() => <KitchenDashboard userName={staffUser.name} onLogout={handleLogout} />} />
       <Route path="/waiter" component={() => <WaiterDashboard userName={staffUser.name} onLogout={handleLogout} />} />
       <Route path="/dashboard" component={() => <OwnerDashboard userName={staffUser.name} onLogout={handleLogout} />} />
