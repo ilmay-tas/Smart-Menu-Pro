@@ -226,7 +226,38 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         orders = await storage.getOrders();
       }
 
-      res.json(orders);
+      // Transform orders to include item names and table numbers
+      const tables = await storage.getTables();
+      const tableMap = Object.fromEntries(tables.map((t) => [t.id, t.tableNumber]));
+      
+      const transformedOrders = await Promise.all(
+        orders.map(async (order) => {
+          const itemsWithNames = await Promise.all(
+            order.items.map(async (item) => {
+              const menuItem = await storage.getMenuItem(item.menuItemId);
+              return {
+                id: String(item.id),
+                name: menuItem?.name || "Unknown Item",
+                quantity: item.quantity,
+                modifiers: [],
+                notes: item.note,
+              };
+            })
+          );
+          
+          return {
+            id: String(order.id),
+            orderNumber: order.orderNumber,
+            tableNumber: String(order.tableId ? tableMap[order.tableId] || "N/A" : "N/A"),
+            items: itemsWithNames,
+            status: order.status,
+            paymentStatus: order.paymentStatus,
+            createdAt: order.createdAt?.toISOString() || new Date().toISOString(),
+          };
+        })
+      );
+
+      res.json(transformedOrders);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

@@ -67,7 +67,7 @@ export default function CustomerMenu({
   });
 
   const createOrderMutation = useMutation({
-    mutationFn: async (orderData: { tableNumber: string; items: any[] }) => {
+    mutationFn: async (orderData: { tableNumber: number; items: any[] }) => {
       const res = await apiRequest("POST", "/api/orders", orderData);
       return res.json();
     },
@@ -135,14 +135,14 @@ export default function CustomerMenu({
 
   const handleCheckout = () => {
     const orderItems = cartItems.map((item) => ({
-      menuItemId: item.menuItemId,
+      menuItemId: parseInt(String(item.menuItemId)),
       name: item.name,
       quantity: item.quantity,
-      price: item.price,
+      unitPrice: item.price,
       modifiers: item.modifierNames,
     }));
 
-    createOrderMutation.mutate({ tableNumber, items: orderItems });
+    createOrderMutation.mutate({ tableNumber: parseInt(String(tableNumber)), items: orderItems });
   };
 
   const toggleModifier = (modifierId: string) => {
