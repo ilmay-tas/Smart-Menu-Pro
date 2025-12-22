@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import StaffSidebar from "@/components/layout/StaffSidebar";
@@ -85,17 +85,29 @@ interface Category {
   name: string;
 }
 
+interface Restaurant {
+  id: number;
+  name: string;
+  address: string;
+  phone: string | null;
+  email: string | null;
+  description: string | null;
+  logoUrl: string | null;
+  ownerId: number | null;
+  isActive: boolean | null;
+}
+
 interface OwnerDashboardProps {
   userName?: string;
   onLogout: () => void;
+  initialTab?: "analytics" | "staff" | "menu";
 }
 
-const RESTAURANT_ID = 1; // TODO: Get from owner's session/context
-
-export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout }: OwnerDashboardProps) {
-  const [activeTab, setActiveTab] = useState<"analytics" | "staff" | "menu">("analytics");
+export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout, initialTab = "analytics" }: OwnerDashboardProps) {
+  const [activeTab, setActiveTab] = useState<"analytics" | "staff" | "menu">(initialTab);
   const [isMenuDialogOpen, setIsMenuDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
+  const [stableRestaurantId, setStableRestaurantId] = useState<number | null>(null);
   const [menuForm, setMenuForm] = useState({
     name: "",
     description: "",
@@ -110,6 +122,18 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   });
   const { toast } = useToast();
 
+  const { data: ownerRestaurant, isLoading: restaurantLoading } = useQuery<Restaurant | null>({
+    queryKey: ["/api/owner/restaurant"],
+  });
+
+  useEffect(() => {
+    if (ownerRestaurant?.id && !stableRestaurantId) {
+      setStableRestaurantId(ownerRestaurant.id);
+    }
+  }, [ownerRestaurant?.id, stableRestaurantId]);
+
+  const restaurantId = stableRestaurantId ?? ownerRestaurant?.id ?? null;
+
   const { data: summary, isLoading: summaryLoading } = useQuery<AnalyticsSummary>({
     queryKey: ["/api/analytics/summary"],
   });
@@ -123,23 +147,23 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   });
 
   const { data: staffAssignments = [], isLoading: staffLoading } = useQuery<StaffAssignment[]>({
-    queryKey: ["/api/restaurants", RESTAURANT_ID, "staff"],
-    enabled: activeTab === "staff",
+    queryKey: ["/api/restaurants", restaurantId, "staff"],
+    enabled: activeTab === "staff" && !!restaurantId,
   });
 
   const { data: menuData, isLoading: menuLoading } = useQuery<{ items: MenuItem[]; categories: Category[] }>({
-    queryKey: ["/api/restaurants", RESTAURANT_ID, "menu"],
-    enabled: activeTab === "menu",
+    queryKey: ["/api/restaurants", restaurantId, "menu"],
+    enabled: activeTab === "menu" && !!restaurantId,
   });
 
   const menuItems = menuData?.items || [];
 
   const approveMutation = useMutation({
-    mutationFn: async ({ staffId, action }: { staffId: number; action: "approve" | "revoke" }) => {
-      return apiRequest("POST", `/api/restaurants/${RESTAURANT_ID}/staff/approve`, { staffId, action });
+    mutationFn: async ({ staffId, action, restId }: { staffId: number; action: "approve" | "revoke"; restId: number }) => {
+      return apiRequest("POST", `/api/restaurants/${restId}/staff/approve`, { staffId, action });
     },
-    onSuccess: (_, { action }) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", RESTAURANT_ID, "staff"] });
+    onSuccess: (_, { action, restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "staff"] });
       toast({
         title: action === "approve" ? "Staff Approved" : "Access Revoked",
         description: action === "approve" ? "Staff member can now access the restaurant." : "Staff member's access has been revoked.",
@@ -155,8 +179,8 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   });
 
   const createMenuMutation = useMutation({
-    mutationFn: async (data: typeof menuForm) => {
-      return apiRequest("POST", `/api/restaurants/${RESTAURANT_ID}/menu`, {
+    mutationFn: async ({ data, restId }: { data: typeof menuForm; restId: number }) => {
+      return apiRequest("POST", `/api/restaurants/${restId}/menu`, {
         name: data.name,
         description: data.description || null,
         price: data.price,
@@ -169,8 +193,8 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         isSoldOut: data.isSoldOut,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", RESTAURANT_ID, "menu"] });
+    onSuccess: (_, { restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
       toast({ title: "Menu Item Created", description: "New menu item has been added." });
       setIsMenuDialogOpen(false);
       resetMenuForm();
@@ -181,8 +205,8 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   });
 
   const updateMenuMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: typeof menuForm }) => {
-      return apiRequest("PUT", `/api/restaurants/${RESTAURANT_ID}/menu/${id}`, {
+    mutationFn: async ({ id, data, restId }: { id: number; data: typeof menuForm; restId: number }) => {
+      return apiRequest("PUT", `/api/restaurants/${restId}/menu/${id}`, {
         name: data.name,
         description: data.description || null,
         price: data.price,
@@ -195,8 +219,8 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         isSoldOut: data.isSoldOut,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", RESTAURANT_ID, "menu"] });
+    onSuccess: (_, { restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
       toast({ title: "Menu Item Updated", description: "Menu item has been updated." });
       setIsMenuDialogOpen(false);
       setEditingItem(null);
@@ -208,11 +232,11 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   });
 
   const deleteMenuMutation = useMutation({
-    mutationFn: async (id: number) => {
-      return apiRequest("DELETE", `/api/restaurants/${RESTAURANT_ID}/menu/${id}`);
+    mutationFn: async ({ id, restId }: { id: number; restId: number }) => {
+      return apiRequest("DELETE", `/api/restaurants/${restId}/menu/${id}`);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", RESTAURANT_ID, "menu"] });
+    onSuccess: (_, { restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
       toast({ title: "Menu Item Deleted", description: "Menu item has been removed." });
     },
     onError: (error: Error) => {
@@ -259,18 +283,41 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   };
 
   const handleMenuSubmit = () => {
+    if (!restaurantId) {
+      toast({ title: "Error", description: "Restaurant not loaded yet. Please wait.", variant: "destructive" });
+      return;
+    }
     if (!menuForm.name || !menuForm.price) {
       toast({ title: "Error", description: "Name and price are required", variant: "destructive" });
       return;
     }
     if (editingItem) {
-      updateMenuMutation.mutate({ id: editingItem.id, data: menuForm });
+      updateMenuMutation.mutate({ id: editingItem.id, data: menuForm, restId: restaurantId });
     } else {
-      createMenuMutation.mutate(menuForm);
+      createMenuMutation.mutate({ data: menuForm, restId: restaurantId });
     }
   };
 
   const isLoading = summaryLoading || topSellingLoading || salesLoading;
+
+  if (restaurantLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!ownerRestaurant || !restaurantId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-muted-foreground mb-4">No restaurant found for this owner.</p>
+          <p className="text-sm text-muted-foreground">Please create a restaurant first.</p>
+        </div>
+      </div>
+    );
+  }
 
   const kpis = summary
     ? [
@@ -414,7 +461,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                               <div className="flex gap-2">
                                 <Button
                                   size="sm"
-                                  onClick={() => approveMutation.mutate({ staffId: assignment.staffId, action: "approve" })}
+                                  onClick={() => approveMutation.mutate({ staffId: assignment.staffId, action: "approve", restId: restaurantId! })}
                                   disabled={approveMutation.isPending}
                                   data-testid={`button-approve-${assignment.staffId}`}
                                 >
@@ -424,7 +471,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => approveMutation.mutate({ staffId: assignment.staffId, action: "revoke" })}
+                                  onClick={() => approveMutation.mutate({ staffId: assignment.staffId, action: "revoke", restId: restaurantId! })}
                                   disabled={approveMutation.isPending}
                                   data-testid={`button-reject-${assignment.staffId}`}
                                 >
@@ -470,7 +517,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                               <Button
                                 size="sm"
                                 variant="destructive"
-                                onClick={() => approveMutation.mutate({ staffId: assignment.staffId, action: "revoke" })}
+                                onClick={() => approveMutation.mutate({ staffId: assignment.staffId, action: "revoke", restId: restaurantId! })}
                                 disabled={approveMutation.isPending}
                                 data-testid={`button-revoke-${assignment.staffId}`}
                               >
@@ -513,7 +560,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => approveMutation.mutate({ staffId: assignment.staffId, action: "approve" })}
+                                onClick={() => approveMutation.mutate({ staffId: assignment.staffId, action: "approve", restId: restaurantId! })}
                                 disabled={approveMutation.isPending}
                                 data-testid={`button-reinstate-${assignment.staffId}`}
                               >
@@ -595,7 +642,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                             <Button
                               size="sm"
                               variant="destructive"
-                              onClick={() => deleteMenuMutation.mutate(item.id)}
+                              onClick={() => deleteMenuMutation.mutate({ id: item.id, restId: restaurantId! })}
                               disabled={deleteMenuMutation.isPending}
                               data-testid={`button-delete-${item.id}`}
                             >

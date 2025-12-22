@@ -126,6 +126,9 @@ function AppContent() {
       <Route path="/kitchen" component={() => <KitchenDashboard userName={staffUser.name} onLogout={handleLogout} />} />
       <Route path="/waiter" component={() => <WaiterDashboard userName={staffUser.name} onLogout={handleLogout} />} />
       <Route path="/dashboard" component={() => <OwnerDashboard userName={staffUser.name} onLogout={handleLogout} />} />
+      <Route path="/owner/orders" component={() => <OwnerDashboard userName={staffUser.name} onLogout={handleLogout} initialTab="analytics" />} />
+      <Route path="/owner/menu" component={() => <OwnerDashboard userName={staffUser.name} onLogout={handleLogout} initialTab="menu" />} />
+      <Route path="/owner/settings" component={() => <OwnerDashboard userName={staffUser.name} onLogout={handleLogout} initialTab="staff" />} />
       <Route component={NotFound} />
     </Switch>
   );

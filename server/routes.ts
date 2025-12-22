@@ -568,6 +568,18 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
+  app.get("/api/owner/restaurant", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const restaurant = await storage.getRestaurantByOwnerId(req.session.staffId!);
+      res.json(restaurant || null);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/restaurants/:id", async (req, res) => {
     try {
       const restaurant = await storage.getRestaurant(parseInt(req.params.id));
