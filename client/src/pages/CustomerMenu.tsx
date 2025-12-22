@@ -199,6 +199,12 @@ export default function CustomerMenu({
     queryKey: ["/api/customer/preferences"],
   });
 
+  // Fetch suggested items based on order history
+  const { data: suggestedData } = useQuery<{ items: MenuItem[] }>({
+    queryKey: ["/api/customer/suggested"],
+  });
+  const suggestedItems = suggestedData?.items || [];
+
   const updatePreferencesMutation = useMutation({
     mutationFn: async (data: CustomerPreferences) => {
       const res = await apiRequest("PUT", "/api/customer/preferences", data);
@@ -455,6 +461,42 @@ export default function CustomerMenu({
 
         {activeTab === "menu" && (
           <>
+            {/* Suggested for You Section */}
+            {suggestedItems.length > 0 && (
+              <div className="space-y-3" data-testid="section-suggested">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-orange-500" />
+                  Suggested for You
+                </h2>
+                <ScrollArea className="w-full">
+                  <div className="flex gap-3 pb-2">
+                    {suggestedItems.map((item) => (
+                      <Card
+                        key={item.id}
+                        className="min-w-[200px] max-w-[200px] overflow-hidden hover-elevate active-elevate-2 cursor-pointer flex-shrink-0"
+                        onClick={() => setSelectedItem(item)}
+                        data-testid={`card-suggested-item-${item.id}`}
+                      >
+                        <div className="h-28 overflow-hidden">
+                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                        </div>
+                        <div className="p-3">
+                          <h3 className="font-medium text-sm truncate">{item.name}</h3>
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-sm font-bold">${parseFloat(item.price).toFixed(2)}</span>
+                            {item.calories && (
+                              <span className="text-xs text-muted-foreground">{item.calories} cal</span>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </ScrollArea>
+                <Separator />
+              </div>
+            )}
+
             <DietaryFilters activeFilter={activeFilter} onFilterChange={setActiveFilter} />
             <CategoryTabs categories={categories} activeCategory={activeCategory} onCategoryChange={setActiveCategory} />
 
@@ -504,7 +546,7 @@ export default function CustomerMenu({
               <div className="text-center py-12 text-muted-foreground">
                 <p>No items match your filters</p>
                 {isFilterApplied && (
-                  <Button variant="link" onClick={() => setIsFilterApplied(false)}>
+                  <Button variant="ghost" onClick={() => setIsFilterApplied(false)} className="underline">
                     Clear myFilter
                   </Button>
                 )}

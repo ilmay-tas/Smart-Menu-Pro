@@ -47,8 +47,11 @@ export interface IStorage {
 
   // Menu Items
   getMenuItems(): Promise<MenuItem[]>;
+  getMenuItemsByRestaurant(restaurantId: number): Promise<MenuItem[]>;
   getMenuItem(id: number): Promise<MenuItem | undefined>;
   createMenuItem(item: InsertMenuItem): Promise<MenuItem>;
+  updateMenuItem(id: number, data: Partial<InsertMenuItem>): Promise<MenuItem | undefined>;
+  deleteMenuItem(id: number): Promise<boolean>;
 
   // Modifiers
   getModifiersForItem(menuItemId: number): Promise<Modifier[]>;
@@ -113,6 +116,10 @@ export interface IStorage {
 
   // Customer Orders with nutrition
   getOrdersWithNutrition(customerId: number): Promise<(OrderTicket & { items: (OrderItem & { menuItem: MenuItem })[] })[]>;
+
+  // Suggested items based on order history
+  getSuggestedItems(customerId: number, limit?: number): Promise<MenuItem[]>;
+  getPopularItems(limit?: number): Promise<MenuItem[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -164,6 +171,20 @@ export class DatabaseStorage implements IStorage {
   async createMenuItem(item: InsertMenuItem): Promise<MenuItem> {
     const [created] = await db.insert(menuItems).values(item).returning();
     return created;
+  }
+
+  async getMenuItemsByRestaurant(restaurantId: number): Promise<MenuItem[]> {
+    return db.select().from(menuItems).where(eq(menuItems.restaurantId, restaurantId));
+  }
+
+  async updateMenuItem(id: number, data: Partial<InsertMenuItem>): Promise<MenuItem | undefined> {
+    const [updated] = await db.update(menuItems).set(data).where(eq(menuItems.id, id)).returning();
+    return updated;
+  }
+
+  async deleteMenuItem(id: number): Promise<boolean> {
+    const result = await db.delete(menuItems).where(eq(menuItems.id, id));
+    return true;
   }
 
   // Modifiers
@@ -457,6 +478,88 @@ export class DatabaseStorage implements IStorage {
       }));
       return { ...order, items: itemsWithMenuItems };
     }));
+  }
+
+  // Get suggested items based on customer order history
+  async getSuggestedItems(customerId: number, limit: number = 6): Promise<MenuItem[]> {
+    // Get customer's order history to find frequently ordered categories
+    const customerOrders = await db.select().from(orderTickets)
+      .where(eq(orderTickets.customerId, customerId));
+    
+    if (customerOrders.length === 0) {
+      // No order history, return popular items
+      return this.getPopularItems(limit);
+    }
+
+    const orderIds = customerOrders.map(o => o.id);
+    
+    // Get all ordered item IDs
+    const orderedItems = await db.select().from(orderItems)
+      .where(sql`${orderItems.orderId} = ANY(${orderIds})`);
+    
+    const orderedMenuItemIds = orderedItems.map(oi => oi.menuItemId);
+    
+    if (orderedMenuItemIds.length === 0) {
+      return this.getPopularItems(limit);
+    }
+
+    // Get the categories of ordered items
+    const orderedMenuItems = await db.select().from(menuItems)
+      .where(sql`${menuItems.id} = ANY(${orderedMenuItemIds})`);
+    
+    const categoryIdSet = new Set(orderedMenuItems.filter(m => m.categoryId).map(m => m.categoryId));
+    const categoryIds = Array.from(categoryIdSet).filter((id): id is number => id !== null);
+    
+    // Get items from same categories that customer hasn't ordered yet
+    let suggestions: MenuItem[] = [];
+    
+    if (categoryIds.length > 0) {
+      suggestions = await db.select().from(menuItems)
+        .where(and(
+          sql`${menuItems.categoryId} = ANY(${categoryIds})`,
+          sql`${menuItems.id} != ALL(${orderedMenuItemIds})`,
+          eq(menuItems.isSoldOut, false)
+        ))
+        .limit(limit);
+    }
+    
+    // If not enough suggestions, add popular items
+    if (suggestions.length < limit) {
+      const popular = await this.getPopularItems(limit - suggestions.length);
+      const existingIds = new Set(suggestions.map(s => s.id));
+      for (const item of popular) {
+        if (!existingIds.has(item.id) && !orderedMenuItemIds.includes(item.id)) {
+          suggestions.push(item);
+          if (suggestions.length >= limit) break;
+        }
+      }
+    }
+    
+    return suggestions;
+  }
+
+  // Get popular items based on order frequency
+  async getPopularItems(limit: number = 6): Promise<MenuItem[]> {
+    // Get most ordered items
+    const popularItemIds = await db.select({
+      menuItemId: orderItems.menuItemId,
+      orderCount: sql<number>`count(*)`.as("order_count")
+    })
+      .from(orderItems)
+      .groupBy(orderItems.menuItemId)
+      .orderBy(sql`count(*) DESC`)
+      .limit(limit);
+    
+    if (popularItemIds.length === 0) {
+      // No orders yet, return some random available items
+      return db.select().from(menuItems)
+        .where(eq(menuItems.isSoldOut, false))
+        .limit(limit);
+    }
+    
+    const ids = popularItemIds.map(p => p.menuItemId);
+    return db.select().from(menuItems)
+      .where(sql`${menuItems.id} = ANY(${ids})`);
   }
 }
 

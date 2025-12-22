@@ -86,21 +86,32 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     try {
       const data = staffSignInSchema.parse(req.body);
       
-      const staff = await storage.getStaffByUsername(data.username);
-      if (!staff) {
+      const staffMember = await storage.getStaffByUsername(data.username);
+      if (!staffMember) {
         return res.status(401).json({ error: "Invalid username or password" });
       }
 
-      const isValidPassword = await verifyPassword(data.password, staff.passwordHash);
+      const isValidPassword = await verifyPassword(data.password, staffMember.passwordHash);
       if (!isValidPassword) {
         return res.status(401).json({ error: "Invalid username or password" });
       }
 
-      req.session.staffId = staff.id;
-      req.session.staffRole = staff.role;
+      // Non-owner staff must have an approved restaurant assignment
+      if (staffMember.role !== "owner") {
+        const approvedAssignment = await storage.getApprovedAssignmentForStaff(staffMember.id);
+        if (!approvedAssignment) {
+          return res.status(403).json({ 
+            error: "Your account is pending approval from the restaurant owner. Please wait for approval before signing in.",
+            pendingApproval: true
+          });
+        }
+      }
+
+      req.session.staffId = staffMember.id;
+      req.session.staffRole = staffMember.role;
       req.session.userType = "staff";
 
-      res.json({ user: { id: staff.id, name: staff.name, username: staff.username, role: staff.role, type: "staff" } });
+      res.json({ user: { id: staffMember.id, name: staffMember.name, username: staffMember.username, role: staffMember.role, type: "staff" } });
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Invalid request" });
     }
@@ -714,6 +725,103 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
+  // ============ OWNER: MENU MANAGEMENT ============
+  app.get("/api/restaurants/:id/menu", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+
+      const restaurantId = parseInt(req.params.id);
+      const restaurant = await storage.getRestaurant(restaurantId);
+      
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+
+      const items = await storage.getMenuItemsByRestaurant(restaurantId);
+      const cats = await storage.getCategories();
+      res.json({ items, categories: cats });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/restaurants/:id/menu", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+
+      const restaurantId = parseInt(req.params.id);
+      const restaurant = await storage.getRestaurant(restaurantId);
+      
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+
+      const itemData = { ...req.body, restaurantId };
+      const item = await storage.createMenuItem(itemData);
+      res.json(item);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to create menu item" });
+    }
+  });
+
+  app.put("/api/restaurants/:id/menu/:itemId", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+
+      const restaurantId = parseInt(req.params.id);
+      const itemId = parseInt(req.params.itemId);
+      const restaurant = await storage.getRestaurant(restaurantId);
+      
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+
+      // Verify item belongs to this restaurant
+      const existingItem = await storage.getMenuItem(itemId);
+      if (!existingItem || existingItem.restaurantId !== restaurantId) {
+        return res.status(404).json({ error: "Menu item not found" });
+      }
+
+      const updated = await storage.updateMenuItem(itemId, req.body);
+      res.json(updated);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update menu item" });
+    }
+  });
+
+  app.delete("/api/restaurants/:id/menu/:itemId", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+
+      const restaurantId = parseInt(req.params.id);
+      const itemId = parseInt(req.params.itemId);
+      const restaurant = await storage.getRestaurant(restaurantId);
+      
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+
+      // Verify item belongs to this restaurant
+      const existingItem = await storage.getMenuItem(itemId);
+      if (!existingItem || existingItem.restaurantId !== restaurantId) {
+        return res.status(404).json({ error: "Menu item not found" });
+      }
+
+      await storage.deleteMenuItem(itemId);
+      res.json({ message: "Menu item deleted" });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to delete menu item" });
+    }
+  });
+
   // ============ CUSTOMER PREFERENCES ============
   app.get("/api/customer/preferences", async (req, res) => {
     try {
@@ -739,6 +847,44 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       res.json(prefs);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  // ============ SUGGESTED ITEMS ============
+  app.get("/api/customer/suggested", async (req, res) => {
+    try {
+      if (req.session.userType !== "customer" || !req.session.customerId) {
+        return res.status(401).json({ error: "Customer authentication required" });
+      }
+
+      const suggestions = await storage.getSuggestedItems(req.session.customerId, 6);
+      const cats = await storage.getCategories();
+      const categoryMap = Object.fromEntries(cats.map((c) => [c.id, c.name]));
+
+      const transformedItems = await Promise.all(suggestions.map(async (item) => {
+        const itemModifiers = await storage.getModifiersForItem(item.id);
+        return {
+          id: String(item.id),
+          name: item.name,
+          description: item.description || "",
+          price: item.price,
+          image: item.imageUrl || "",
+          category: item.categoryId ? categoryMap[item.categoryId] || "Other" : "Other",
+          isVegan: item.isVegan,
+          isGlutenFree: item.isGlutenFree,
+          isSpicy: item.isSpicy,
+          allergens: item.allergens,
+          modifiers: itemModifiers.map((m) => ({ id: String(m.id), name: m.name, price: m.additionalCost })),
+          calories: item.calories,
+          protein: item.proteinGrams,
+          carbs: item.carbsGrams,
+          fat: item.fatGrams,
+        };
+      }));
+
+      res.json({ items: transformedItems });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to get suggestions" });
     }
   });
 
