@@ -118,6 +118,7 @@ export const customerPreferences = pgTable("customer_preferences", {
   priceSensitivity: priceSensitivityEnum("price_sensitivity"),
   preferOrganic: boolean("prefer_organic").default(false),
   preferLocallySourced: boolean("prefer_locally_sourced").default(false),
+  preferSpicy: boolean("prefer_spicy").default(false),
   avoidSpicy: boolean("avoid_spicy").default(false),
   avoidAlcohol: boolean("avoid_alcohol").default(false),
   avoidCaffeine: boolean("avoid_caffeine").default(false),
@@ -367,6 +368,7 @@ export const updateCustomerPreferencesSchema = z.object({
   priceSensitivity: z.enum(["value", "moderate", "premium"]).optional(),
   preferOrganic: z.boolean().optional(),
   preferLocallySourced: z.boolean().optional(),
+  preferSpicy: z.boolean().optional(),
   avoidSpicy: z.boolean().optional(),
   avoidAlcohol: z.boolean().optional(),
   avoidCaffeine: z.boolean().optional(),
@@ -396,7 +398,15 @@ export type UpdateCustomerPreferencesRequest = z.infer<typeof updateCustomerPref
 export type StaffApprovalRequest = z.infer<typeof staffApprovalSchema>;
 
 // Preference options for myFilter UI
-export const DIETARY_RESTRICTIONS = ["vegan", "vegetarian", "pescatarian", "halal", "kosher", "none"] as const;
+export const DIETARY_RESTRICTIONS = [
+  "vegan",
+  "vegetarian",
+  "pescatarian",
+  "gluten_free",
+  "halal",
+  "kosher",
+  "none",
+] as const;
 export const ALLERGENS = ["peanuts", "tree_nuts", "dairy", "eggs", "soy", "gluten", "shellfish", "fish", "sesame", "none"] as const;
 export const CUISINES = ["american", "italian", "mexican", "mediterranean", "asian", "indian", "middle_eastern", "latin", "african", "fusion"] as const;
 export const PROTEINS = ["beef", "poultry", "pork", "seafood", "plant_based", "eggs", "legumes"] as const;

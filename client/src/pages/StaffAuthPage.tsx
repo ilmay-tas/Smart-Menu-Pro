@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { UtensilsCrossed, User, Lock, Loader2, Eye, EyeOff, Building2, Phone, Mail, MapPin, CheckCircle } from "lucide-react";
+import { User, Lock, Loader2, Eye, EyeOff, Building2, Phone, Mail, MapPin, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -198,8 +198,8 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md p-8">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-primary rounded-full flex items-center justify-center mb-4">
-            <UtensilsCrossed className="w-8 h-8 text-primary-foreground" />
+          <div className="mb-4">
+            <img src="/menu/logo.png" alt="MyDine logo" className="w-16 h-16 object-contain" />
           </div>
           <h1 className="text-2xl font-bold">MyDine Staff</h1>
           <p className="text-muted-foreground text-sm">Restaurant Staff Portal</p>

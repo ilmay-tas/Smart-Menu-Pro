@@ -1,6 +1,7 @@
 import { db } from "./db";
 import bcrypt from "bcryptjs";
 import { menuItems, modifiers, restaurantTables, categories, staff, restaurants } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const categoryData = [
   { name: "Starters" },
@@ -16,6 +17,10 @@ const menuData = [
     price: "14.99",
     imageUrl: "/menu/burger.png",
     category: "Mains",
+    calories: 780,
+    proteinGrams: "42",
+    carbsGrams: "52",
+    fatGrams: "45",
     isVegan: false,
     isGlutenFree: false,
     isSpicy: false,
@@ -31,6 +36,10 @@ const menuData = [
     price: "16.99",
     imageUrl: "/menu/pasta.png",
     category: "Mains",
+    calories: 860,
+    proteinGrams: "32",
+    carbsGrams: "78",
+    fatGrams: "46",
     isVegan: false,
     isGlutenFree: false,
     isSpicy: false,
@@ -45,6 +54,10 @@ const menuData = [
     price: "11.99",
     imageUrl: "/menu/salad.png",
     category: "Starters",
+    calories: 420,
+    proteinGrams: "12",
+    carbsGrams: "24",
+    fatGrams: "30",
     isVegan: false,
     isGlutenFree: true,
     isSpicy: false,
@@ -59,6 +72,10 @@ const menuData = [
     price: "22.99",
     imageUrl: "/menu/salmon.png",
     category: "Mains",
+    calories: 520,
+    proteinGrams: "45",
+    carbsGrams: "12",
+    fatGrams: "32",
     isVegan: false,
     isGlutenFree: true,
     isSpicy: false,
@@ -71,6 +88,10 @@ const menuData = [
     price: "8.99",
     imageUrl: "/menu/cake.png",
     category: "Desserts",
+    calories: 690,
+    proteinGrams: "8",
+    carbsGrams: "76",
+    fatGrams: "40",
     isVegan: false,
     isGlutenFree: false,
     isSpicy: false,
@@ -83,6 +104,10 @@ const menuData = [
     price: "15.99",
     imageUrl: "/menu/pizza.png",
     category: "Mains",
+    calories: 860,
+    proteinGrams: "36",
+    carbsGrams: "98",
+    fatGrams: "34",
     isVegan: false,
     isGlutenFree: false,
     isSpicy: false,
@@ -92,27 +117,193 @@ const menuData = [
       { name: "Add Olives", additionalCost: "1.00" },
     ],
   },
+  {
+    name: "Vegan Buddha Bowl",
+    description: "Quinoa, roasted veggies, chickpeas, and tahini dressing",
+    price: "13.99",
+    imageUrl: "/menu/buddha_bowl.png",
+    category: "Mains",
+    calories: 560,
+    proteinGrams: "20",
+    carbsGrams: "78",
+    fatGrams: "18",
+    isVegan: true,
+    isVegetarian: true,
+    isGlutenFree: true,
+    isDairyFree: true,
+    isNutFree: true,
+    isSpicy: false,
+    allergens: [],
+    modifiers: [
+      { name: "Add Avocado", additionalCost: "2.00" },
+    ],
+  },
+  {
+    name: "Mediterranean Falafel Wrap",
+    description: "Crispy falafel with lettuce, tomato, and garlic sauce",
+    price: "12.49",
+    imageUrl: "/menu/falafel_wrap.png",
+    category: "Mains",
+    calories: 640,
+    proteinGrams: "18",
+    carbsGrams: "84",
+    fatGrams: "24",
+    isVegan: true,
+    isVegetarian: true,
+    isGlutenFree: false,
+    isDairyFree: true,
+    isSpicy: false,
+    allergens: ["Gluten"],
+    modifiers: [
+      { name: "Add Hummus", additionalCost: "1.50" },
+    ],
+  },
+  {
+    name: "Spicy Tofu Stir-Fry",
+    description: "Tofu, mixed vegetables, and chili garlic sauce",
+    price: "14.49",
+    imageUrl: "/menu/tofu_stirfry.png",
+    category: "Mains",
+    calories: 510,
+    proteinGrams: "28",
+    carbsGrams: "48",
+    fatGrams: "22",
+    isVegan: true,
+    isVegetarian: true,
+    isGlutenFree: true,
+    isDairyFree: true,
+    isSpicy: true,
+    spiceLevel: "hot",
+    allergens: ["Soy"],
+    modifiers: [
+      { name: "Extra Chili", additionalCost: "1.00" },
+    ],
+  },
+  {
+    name: "Grilled Chicken Skewers",
+    description: "Lemon herb chicken with grilled peppers",
+    price: "15.49",
+    imageUrl: "/menu/chicken_skewers.png",
+    category: "Starters",
+    calories: 360,
+    proteinGrams: "34",
+    carbsGrams: "10",
+    fatGrams: "18",
+    isVegan: false,
+    isGlutenFree: true,
+    isHalal: true,
+    isSpicy: false,
+    allergens: [],
+    modifiers: [
+      { name: "Add Garlic Sauce", additionalCost: "1.00" },
+    ],
+  },
+  {
+    name: "Fresh Fruit Parfait",
+    description: "Seasonal fruit, yogurt, and granola",
+    price: "7.99",
+    imageUrl: "/menu/chia_pudding.png",
+    category: "Desserts",
+    calories: 320,
+    proteinGrams: "9",
+    carbsGrams: "54",
+    fatGrams: "8",
+    isVegan: false,
+    isVegetarian: true,
+    isGlutenFree: false,
+    isSpicy: false,
+    allergens: ["Dairy", "Gluten"],
+    modifiers: [
+      { name: "Add Honey", additionalCost: "0.75" },
+    ],
+  },
+  {
+    name: "Iced Mint Lemonade",
+    description: "Fresh lemon juice, mint, and sparkling water",
+    price: "4.99",
+    imageUrl: "/menu/lemonade.png",
+    category: "Drinks",
+    calories: 120,
+    proteinGrams: "1",
+    carbsGrams: "30",
+    fatGrams: "0",
+    isVegan: true,
+    isGlutenFree: true,
+    isDairyFree: true,
+    isSpicy: false,
+    isAlcoholic: false,
+    isCaffeinated: false,
+    allergens: [],
+    modifiers: [
+      { name: "Add Ginger", additionalCost: "0.50" },
+    ],
+  },
+  {
+    name: "Iced Latte",
+    description: "Chilled espresso with milk and a touch of vanilla",
+    price: "5.49",
+    imageUrl: "/menu/iced_latte.png",
+    category: "Drinks",
+    calories: 180,
+    proteinGrams: "8",
+    carbsGrams: "22",
+    fatGrams: "6",
+    isVegan: false,
+    isVegetarian: true,
+    isGlutenFree: true,
+    isDairyFree: false,
+    isSpicy: false,
+    isAlcoholic: false,
+    isCaffeinated: true,
+    allergens: ["Dairy"],
+    modifiers: [
+      { name: "Oat Milk", additionalCost: "0.75" },
+    ],
+  },
 ];
 
 export async function seedDatabase() {
   console.log("Seeding database...");
 
-  // Check if menu items already exist
-  const existingItems = await db.select().from(menuItems);
-  if (existingItems.length > 0) {
-    console.log("Database already seeded, skipping...");
-    return;
-  }
-
-  // Seed categories
   const categoryMap: Record<string, number> = {};
+  const existingCategories = await db.select().from(categories);
+  for (const cat of existingCategories) {
+    categoryMap[cat.name] = cat.id;
+  }
   for (const cat of categoryData) {
+    if (categoryMap[cat.name]) continue;
     const [created] = await db.insert(categories).values(cat).returning();
     categoryMap[cat.name] = created.id;
   }
 
   // Seed menu items
+  const existingItems = await db.select({
+    id: menuItems.id,
+    name: menuItems.name,
+    imageUrl: menuItems.imageUrl,
+  }).from(menuItems);
+  const existingItemsByName = new Map(existingItems.map((item) => [item.name, item]));
   for (const item of menuData) {
+    const existing = existingItemsByName.get(item.name);
+    if (existing) {
+      const needsUpdate = existing.imageUrl !== item.imageUrl
+        || existing.calories !== item.calories
+        || existing.proteinGrams !== item.proteinGrams
+        || existing.carbsGrams !== item.carbsGrams
+        || existing.fatGrams !== item.fatGrams;
+      if (needsUpdate) {
+        await db.update(menuItems)
+          .set({
+            imageUrl: item.imageUrl,
+            calories: item.calories,
+            proteinGrams: item.proteinGrams,
+            carbsGrams: item.carbsGrams,
+            fatGrams: item.fatGrams,
+          })
+          .where(eq(menuItems.id, existing.id));
+      }
+      continue;
+    }
     const { modifiers: itemModifiers, category, ...menuItem } = item;
     const [created] = await db.insert(menuItems).values({
       ...menuItem,
@@ -130,8 +321,11 @@ export async function seedDatabase() {
   }
 
   // Seed tables (1-12)
-  for (let i = 1; i <= 12; i++) {
-    await db.insert(restaurantTables).values({ tableNumber: i });
+  const existingTables = await db.select().from(restaurantTables);
+  if (existingTables.length === 0) {
+    for (let i = 1; i <= 12; i++) {
+      await db.insert(restaurantTables).values({ tableNumber: i });
+    }
   }
 
   // Seed staff users
@@ -142,22 +336,28 @@ export async function seedDatabase() {
   ];
 
   let ownerId: number | null = null;
-  for (const staffUser of staffData) {
-    const passwordHash = await bcrypt.hash(staffUser.password, 10);
-    const [created] = await db.insert(staff).values({
-      username: staffUser.username,
-      passwordHash,
-      name: staffUser.name,
-      role: staffUser.role,
-    }).returning();
-    
-    if (staffUser.role === "owner") {
-      ownerId = created.id;
+  const existingStaff = await db.select().from(staff);
+  if (existingStaff.length === 0) {
+    for (const staffUser of staffData) {
+      const passwordHash = await bcrypt.hash(staffUser.password, 10);
+      const [created] = await db.insert(staff).values({
+        username: staffUser.username,
+        passwordHash,
+        name: staffUser.name,
+        role: staffUser.role,
+      }).returning();
+      
+      if (staffUser.role === "owner") {
+        ownerId = created.id;
+      }
     }
+  } else {
+    ownerId = existingStaff.find((user) => user.role === "owner")?.id ?? null;
   }
 
   // Seed default restaurant for owner
-  if (ownerId) {
+  const existingRestaurants = await db.select().from(restaurants);
+  if (ownerId && existingRestaurants.length === 0) {
     await db.insert(restaurants).values({
       name: "MyDine Restaurant",
       address: "123 Main Street, Foodville, CA 90210",

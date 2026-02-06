@@ -445,8 +445,12 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
       // Check if there's already an active call for this table
       const existingCalls = await storage.getCallsByTable(table.id);
-      if (existingCalls.length > 0) {
+      const pendingCall = existingCalls.find((call) => call.status === "pending");
+      if (pendingCall) {
         return res.status(400).json({ error: "There's already an active waiter call for your table" });
+      }
+      if (existingCalls.some((call) => call.status === "acknowledged")) {
+        await storage.resolveAcknowledgedCallsByTable(table.id);
       }
 
       const call = await storage.createTableCall({
@@ -854,7 +858,13 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(401).json({ error: "Customer authentication required" });
       }
 
-      const data = updateCustomerPreferencesSchema.parse(req.body);
+      const normalized = Object.fromEntries(
+        Object.entries(req.body ?? {}).map(([key, value]) => [
+          key,
+          value === null ? undefined : value,
+        ]),
+      );
+      const data = updateCustomerPreferencesSchema.parse(normalized);
       const prefs = await storage.upsertCustomerPreferences(req.session.customerId, data);
       res.json(prefs);
     } catch (error: any) {
@@ -1037,7 +1047,9 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
             // Allergen avoidance
             if (prefs.allergensToAvoid?.length) {
-              const itemAllergens = item.allergens || [];
+              const itemAllergens = (item.allergens || []).map((allergen) =>
+                allergen.toLowerCase(),
+              );
               for (const allergen of prefs.allergensToAvoid) {
                 if (itemAllergens.includes(allergen)) return false;
               }
@@ -1045,9 +1057,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
             // Gluten-free
             if (prefs.dietaryRestrictions?.includes("gluten_free") && !item.isGlutenFree) return false;
+            if (prefs.allergensToAvoid?.includes("gluten") && !item.isGlutenFree) return false;
 
             // Avoid spicy
             if (prefs.avoidSpicy && item.isSpicy) return false;
+            if (prefs.preferSpicy && !item.isSpicy) return false;
 
             // Avoid alcohol
             if (prefs.avoidAlcohol && item.isAlcoholic) return false;

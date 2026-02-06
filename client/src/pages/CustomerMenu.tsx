@@ -11,6 +11,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Plus, Minus, Leaf, WheatOff, Flame, Loader2, Bell, Clock, Package, CheckCircle, ChevronDown, ChevronUp, Filter, X, User, Settings } from "lucide-react";
@@ -22,7 +23,6 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -38,20 +38,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   DIETARY_RESTRICTIONS,
-  ALLERGENS,
-  CUISINES,
-  PROTEINS,
-  COOKING_METHODS,
-  MEAL_TYPES,
-  BEVERAGES,
 } from "@shared/schema";
 
 interface MenuModifier {
@@ -133,6 +120,7 @@ interface CustomerPreferences {
   priceSensitivity?: string;
   preferOrganic?: boolean;
   preferLocallySourced?: boolean;
+  preferSpicy?: boolean;
   avoidSpicy?: boolean;
   avoidAlcohol?: boolean;
   avoidCaffeine?: boolean;
@@ -185,7 +173,7 @@ export default function CustomerMenu({
     queryKey: ["/api/menu/filtered", isFilterApplied],
     queryFn: async () => {
       const url = isFilterApplied ? "/api/menu/filtered?applyFilter=true" : "/api/menu";
-      const res = await fetch(url);
+      const res = await apiRequest("GET", url);
       return res.json();
     },
   });
@@ -773,7 +761,31 @@ export default function CustomerMenu({
         open={isPreferencesOpen}
         onOpenChange={setIsPreferencesOpen}
         preferences={preferences}
-        onSave={(prefs) => updatePreferencesMutation.mutate(prefs)}
+        onSave={(prefs) => {
+          const cleanedPrefs: CustomerPreferences = {
+            dietaryRestrictions: prefs.dietaryRestrictions ?? [],
+            calorieTargetMin: prefs.calorieTargetMin,
+            calorieTargetMax: prefs.calorieTargetMax,
+            preferSpicy: prefs.preferSpicy ?? false,
+            avoidSpicy: prefs.avoidSpicy ?? false,
+            allergensToAvoid: [],
+            dislikedIngredients: [],
+            preferredCuisines: [],
+            preferredProteins: [],
+            preferredCookingMethods: [],
+            mealTypes: [],
+            beveragePreferences: [],
+            avoidAlcohol: false,
+            avoidCaffeine: false,
+            lowSodium: false,
+            lowSugar: false,
+            highProtein: false,
+            lowCarb: false,
+            preferOrganic: false,
+            preferLocallySourced: false,
+          };
+          updatePreferencesMutation.mutate(cleanedPrefs);
+        }}
         isSaving={updatePreferencesMutation.isPending}
       />
     </div>
@@ -799,8 +811,30 @@ function PreferencesDialog({ open, onOpenChange, preferences, onSave, isSaving }
     setLocalPrefs({ ...localPrefs, [key]: newArray });
   };
 
-  const toggleBoolean = (key: keyof CustomerPreferences) => {
-    setLocalPrefs({ ...localPrefs, [key]: !localPrefs[key] });
+  const handleNumberChange = (key: keyof CustomerPreferences, value: string) => {
+    const parsed = value === "" ? undefined : Number(value);
+    setLocalPrefs({
+      ...localPrefs,
+      [key]: Number.isNaN(parsed) ? undefined : parsed,
+    });
+  };
+
+  const setSpicyPreference = (preference: "spicy" | "no_spicy") => {
+    if (preference === "spicy") {
+      const nextPrefer = !localPrefs.preferSpicy;
+      setLocalPrefs({
+        ...localPrefs,
+        preferSpicy: nextPrefer || undefined,
+        avoidSpicy: undefined,
+      });
+      return;
+    }
+    const nextAvoid = !localPrefs.avoidSpicy;
+    setLocalPrefs({
+      ...localPrefs,
+      avoidSpicy: nextAvoid || undefined,
+      preferSpicy: undefined,
+    });
   };
 
   return (
@@ -817,7 +851,7 @@ function PreferencesDialog({ open, onOpenChange, preferences, onSave, isSaving }
             <div>
               <h3 className="font-semibold mb-3">Dietary Restrictions</h3>
               <div className="flex flex-wrap gap-2">
-                {DIETARY_RESTRICTIONS.filter(d => d !== "none").map((diet) => (
+                {DIETARY_RESTRICTIONS.filter((diet) => diet === "vegan" || diet === "gluten_free").map((diet) => (
                   <Badge
                     key={diet}
                     variant={localPrefs.dietaryRestrictions?.includes(diet) ? "default" : "outline"}
@@ -831,198 +865,49 @@ function PreferencesDialog({ open, onOpenChange, preferences, onSave, isSaving }
             </div>
 
             <div>
-              <h3 className="font-semibold mb-3">Allergens to Avoid</h3>
+              <h3 className="font-semibold mb-3">Spicy Preference</h3>
               <div className="flex flex-wrap gap-2">
-                {ALLERGENS.filter(a => a !== "none").map((allergen) => (
-                  <Badge
-                    key={allergen}
-                    variant={localPrefs.allergensToAvoid?.includes(allergen) ? "destructive" : "outline"}
-                    className="cursor-pointer capitalize"
-                    onClick={() => toggleArrayItem("allergensToAvoid", allergen)}
-                  >
-                    {allergen.replace("_", " ")}
-                  </Badge>
-                ))}
+                <Badge
+                  variant={localPrefs.preferSpicy ? "default" : "outline"}
+                  className="cursor-pointer"
+                  onClick={() => setSpicyPreference("spicy")}
+                >
+                  Spicy
+                </Badge>
+                <Badge
+                  variant={localPrefs.avoidSpicy ? "default" : "outline"}
+                  className="cursor-pointer"
+                  onClick={() => setSpicyPreference("no_spicy")}
+                >
+                  No Spicy
+                </Badge>
               </div>
             </div>
 
             <div>
-              <h3 className="font-semibold mb-3">Preferred Cuisines</h3>
-              <div className="flex flex-wrap gap-2">
-                {CUISINES.map((cuisine) => (
-                  <Badge
-                    key={cuisine}
-                    variant={localPrefs.preferredCuisines?.includes(cuisine) ? "default" : "outline"}
-                    className="cursor-pointer capitalize"
-                    onClick={() => toggleArrayItem("preferredCuisines", cuisine)}
-                  >
-                    {cuisine.replace("_", " ")}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h3 className="font-semibold mb-3">Preferred Proteins</h3>
-              <div className="flex flex-wrap gap-2">
-                {PROTEINS.map((protein) => (
-                  <Badge
-                    key={protein}
-                    variant={localPrefs.preferredProteins?.includes(protein) ? "default" : "outline"}
-                    className="cursor-pointer capitalize"
-                    onClick={() => toggleArrayItem("preferredProteins", protein)}
-                  >
-                    {protein.replace("_", " ")}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h3 className="font-semibold mb-3">Cooking Methods</h3>
-              <div className="flex flex-wrap gap-2">
-                {COOKING_METHODS.map((method) => (
-                  <Badge
-                    key={method}
-                    variant={localPrefs.preferredCookingMethods?.includes(method) ? "default" : "outline"}
-                    className="cursor-pointer capitalize"
-                    onClick={() => toggleArrayItem("preferredCookingMethods", method)}
-                  >
-                    {method.replace("_", " ")}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h3 className="font-semibold mb-3">Meal Types</h3>
-              <div className="flex flex-wrap gap-2">
-                {MEAL_TYPES.map((meal) => (
-                  <Badge
-                    key={meal}
-                    variant={localPrefs.mealTypes?.includes(meal) ? "default" : "outline"}
-                    className="cursor-pointer capitalize"
-                    onClick={() => toggleArrayItem("mealTypes", meal)}
-                  >
-                    {meal.replace("_", " ")}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h3 className="font-semibold mb-3">Beverage Preferences</h3>
-              <div className="flex flex-wrap gap-2">
-                {BEVERAGES.map((beverage) => (
-                  <Badge
-                    key={beverage}
-                    variant={localPrefs.beveragePreferences?.includes(beverage) ? "default" : "outline"}
-                    className="cursor-pointer capitalize"
-                    onClick={() => toggleArrayItem("beveragePreferences", beverage)}
-                  >
-                    {beverage.replace("_", " ")}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
-            <Separator />
-
-            <div>
-              <h3 className="font-semibold mb-3">Spice Tolerance</h3>
-              <Select
-                value={localPrefs.spiceLevel || ""}
-                onValueChange={(v) => setLocalPrefs({ ...localPrefs, spiceLevel: v })}
-              >
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Select spice level" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No spice</SelectItem>
-                  <SelectItem value="mild">Mild</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="hot">Hot</SelectItem>
-                  <SelectItem value="extra_hot">Extra Hot</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Separator />
-
-            <div>
-              <h3 className="font-semibold mb-3">Additional Preferences</h3>
+              <h3 className="font-semibold mb-3">Calorie Preference</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="avoidSpicy"
-                    checked={localPrefs.avoidSpicy || false}
-                    onCheckedChange={() => toggleBoolean("avoidSpicy")}
+                <div className="space-y-2">
+                  <Label htmlFor="calorie-min">Minimum Calories</Label>
+                  <Input
+                    id="calorie-min"
+                    type="number"
+                    min="0"
+                    placeholder="e.g. 300"
+                    value={localPrefs.calorieTargetMin ?? ""}
+                    onChange={(e) => handleNumberChange("calorieTargetMin", e.target.value)}
                   />
-                  <Label htmlFor="avoidSpicy">Avoid Spicy Food</Label>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="avoidAlcohol"
-                    checked={localPrefs.avoidAlcohol || false}
-                    onCheckedChange={() => toggleBoolean("avoidAlcohol")}
+                <div className="space-y-2">
+                  <Label htmlFor="calorie-max">Maximum Calories</Label>
+                  <Input
+                    id="calorie-max"
+                    type="number"
+                    min="0"
+                    placeholder="e.g. 700"
+                    value={localPrefs.calorieTargetMax ?? ""}
+                    onChange={(e) => handleNumberChange("calorieTargetMax", e.target.value)}
                   />
-                  <Label htmlFor="avoidAlcohol">Avoid Alcohol</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="avoidCaffeine"
-                    checked={localPrefs.avoidCaffeine || false}
-                    onCheckedChange={() => toggleBoolean("avoidCaffeine")}
-                  />
-                  <Label htmlFor="avoidCaffeine">Avoid Caffeine</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="lowSodium"
-                    checked={localPrefs.lowSodium || false}
-                    onCheckedChange={() => toggleBoolean("lowSodium")}
-                  />
-                  <Label htmlFor="lowSodium">Low Sodium</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="lowSugar"
-                    checked={localPrefs.lowSugar || false}
-                    onCheckedChange={() => toggleBoolean("lowSugar")}
-                  />
-                  <Label htmlFor="lowSugar">Low Sugar</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="highProtein"
-                    checked={localPrefs.highProtein || false}
-                    onCheckedChange={() => toggleBoolean("highProtein")}
-                  />
-                  <Label htmlFor="highProtein">High Protein</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="lowCarb"
-                    checked={localPrefs.lowCarb || false}
-                    onCheckedChange={() => toggleBoolean("lowCarb")}
-                  />
-                  <Label htmlFor="lowCarb">Low Carb</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="preferOrganic"
-                    checked={localPrefs.preferOrganic || false}
-                    onCheckedChange={() => toggleBoolean("preferOrganic")}
-                  />
-                  <Label htmlFor="preferOrganic">Prefer Organic</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="preferLocallySourced"
-                    checked={localPrefs.preferLocallySourced || false}
-                    onCheckedChange={() => toggleBoolean("preferLocallySourced")}
-                  />
-                  <Label htmlFor="preferLocallySourced">Prefer Locally Sourced</Label>
                 </div>
               </div>
             </div>

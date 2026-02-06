@@ -83,6 +83,7 @@ export interface IStorage {
   // Table Calls
   getActiveCalls(): Promise<TableCall[]>;
   getCallsByTable(tableId: number): Promise<TableCall[]>;
+  resolveAcknowledgedCallsByTable(tableId: number): Promise<number>;
   createTableCall(data: InsertTableCall): Promise<TableCall>;
   acknowledgeCall(callId: number, staffId: number): Promise<TableCall | undefined>;
   resolveCall(callId: number): Promise<TableCall | undefined>;
@@ -292,6 +293,14 @@ export class DatabaseStorage implements IStorage {
   async getCallsByTable(tableId: number): Promise<TableCall[]> {
     return db.select().from(tableCalls)
       .where(and(eq(tableCalls.tableId, tableId), ne(tableCalls.status, "resolved")));
+  }
+
+  async resolveAcknowledgedCallsByTable(tableId: number): Promise<number> {
+    const resolved = await db.update(tableCalls)
+      .set({ status: "resolved", resolvedAt: new Date() })
+      .where(and(eq(tableCalls.tableId, tableId), eq(tableCalls.status, "acknowledged")))
+      .returning();
+    return resolved.length;
   }
 
   async createTableCall(data: InsertTableCall): Promise<TableCall> {
