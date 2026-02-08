@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient, apiRequest } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -36,6 +36,7 @@ function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"customer" | "staff">("customer");
+  const [, navigate] = useLocation();
 
   useEffect(() => {
     async function checkAuth() {
@@ -56,6 +57,7 @@ function AppContent() {
 
   const handleLogin = (loggedInUser: User) => {
     setUser(loggedInUser);
+    navigate("/");
   };
 
   const handleLogout = async () => {
@@ -66,6 +68,7 @@ function AppContent() {
     }
     setUser(null);
     queryClient.clear();
+    navigate("/");
   };
 
   if (isLoading) {

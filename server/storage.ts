@@ -13,6 +13,7 @@ import {
   restaurants,
   customerPreferences,
   staffRestaurantAssignments,
+  feedback,
   type Staff,
   type InsertStaff,
   type Customer,
@@ -32,6 +33,8 @@ import {
   type InsertCustomerPreference,
   type StaffRestaurantAssignment,
   type InsertStaffRestaurantAssignment,
+  type Feedback,
+  type InsertFeedback,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -122,6 +125,12 @@ export interface IStorage {
   // Suggested items based on order history
   getSuggestedItems(customerId: number, limit?: number): Promise<MenuItem[]>;
   getPopularItems(limit?: number): Promise<MenuItem[]>;
+
+  // Feedback
+  createFeedback(data: InsertFeedback): Promise<Feedback>;
+  getFeedbackByOrder(orderId: number): Promise<Feedback | undefined>;
+  getAggregatedFeedback(): Promise<{ avgSpeed: number; avgService: number; avgTaste: number; totalReviews: number }>;
+  getRecentFeedback(limit: number): Promise<(Feedback & { orderNumber: string; tableNumber: number | null })[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -551,6 +560,60 @@ export class DatabaseStorage implements IStorage {
     }
     
     return suggestions;
+  }
+
+  // Feedback
+  async createFeedback(data: InsertFeedback): Promise<Feedback> {
+    const [created] = await db.insert(feedback).values(data).returning();
+    return created;
+  }
+
+  async getFeedbackByOrder(orderId: number): Promise<Feedback | undefined> {
+    const [fb] = await db.select().from(feedback).where(eq(feedback.orderId, orderId));
+    return fb;
+  }
+
+  async getAggregatedFeedback(): Promise<{ avgSpeed: number; avgService: number; avgTaste: number; totalReviews: number }> {
+    const result = await db.execute(sql`
+      SELECT 
+        COALESCE(AVG(speed_rating), 0) as avg_speed,
+        COALESCE(AVG(service_rating), 0) as avg_service,
+        COALESCE(AVG(taste_rating), 0) as avg_taste,
+        COUNT(*) as total_reviews
+      FROM feedback
+    `);
+    const row = result.rows[0] as any;
+    return {
+      avgSpeed: parseFloat(row.avg_speed || "0"),
+      avgService: parseFloat(row.avg_service || "0"),
+      avgTaste: parseFloat(row.avg_taste || "0"),
+      totalReviews: parseInt(row.total_reviews || "0"),
+    };
+  }
+
+  async getRecentFeedback(limit: number): Promise<(Feedback & { orderNumber: string; tableNumber: number | null })[]> {
+    const result = await db.execute(sql`
+      SELECT 
+        f.*,
+        ot.order_number,
+        rt.table_number
+      FROM feedback f
+      JOIN order_tickets ot ON f.order_id = ot.id
+      LEFT JOIN restaurant_tables rt ON ot.table_id = rt.id
+      ORDER BY f.created_at DESC
+      LIMIT ${limit}
+    `);
+    return result.rows.map((row: any) => ({
+      id: row.id,
+      orderId: row.order_id,
+      speedRating: row.speed_rating,
+      serviceRating: row.service_rating,
+      tasteRating: row.taste_rating,
+      comment: row.comment,
+      createdAt: row.created_at,
+      orderNumber: row.order_number,
+      tableNumber: row.table_number,
+    }));
   }
 
   // Get popular items based on order frequency

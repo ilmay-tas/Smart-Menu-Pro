@@ -165,7 +165,7 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
     new: orders.filter((o) => o.status === "new").length,
     in_progress: orders.filter((o) => o.status === "in_progress").length,
     ready: orders.filter((o) => o.status === "ready").length,
-    delivered: orders.filter((o) => o.status === "delivered").length,
+    delivered: orders.filter((o) => o.status === "delivered" && o.paymentStatus !== "paid").length,
   };
 
   const getElapsedTime = (createdAt: string) => {

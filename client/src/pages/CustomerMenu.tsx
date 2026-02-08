@@ -14,7 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Minus, Leaf, WheatOff, Flame, Loader2, Bell, Clock, Package, CheckCircle, ChevronDown, ChevronUp, Filter, X, User, Settings } from "lucide-react";
+import { Plus, Minus, Leaf, WheatOff, Flame, Loader2, Bell, Clock, Package, CheckCircle, ChevronDown, ChevronUp, Filter, X, User, Settings, Star } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   DropdownMenu,
@@ -167,6 +169,10 @@ export default function CustomerMenu({
   const [isFilterApplied, setIsFilterApplied] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const [nutritionView, setNutritionView] = useState<"daily" | "weekly">("daily");
+  const [feedbackOrderId, setFeedbackOrderId] = useState<string | null>(null);
+  const [feedbackRatings, setFeedbackRatings] = useState({ speed: 0, service: 0, taste: 0 });
+  const [feedbackComment, setFeedbackComment] = useState("");
+  const [submittedFeedbackOrders, setSubmittedFeedbackOrders] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
   const { data: menuItems = [], isLoading } = useQuery<MenuItem[]>({
@@ -237,6 +243,60 @@ export default function CustomerMenu({
       toast({ title: "Unable to Call Waiter", description: error.message, variant: "destructive" });
     },
   });
+
+  const submitFeedbackMutation = useMutation({
+    mutationFn: async ({ orderId, data }: { orderId: string; data: { speedRating: number; serviceRating: number; tasteRating: number; comment?: string } }) => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/feedback`, data);
+      return res.json();
+    },
+    onSuccess: (_, { orderId }) => {
+      toast({ title: "Thank You!", description: "Your feedback has been submitted" });
+      setSubmittedFeedbackOrders((prev) => new Set(prev).add(orderId));
+      setFeedbackOrderId(null);
+      setFeedbackRatings({ speed: 0, service: 0, taste: 0 });
+      setFeedbackComment("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSubmitFeedback = () => {
+    if (!feedbackOrderId) return;
+    if (feedbackRatings.speed === 0 || feedbackRatings.service === 0 || feedbackRatings.taste === 0) {
+      toast({ title: "Please rate all categories", description: "All three ratings are required", variant: "destructive" });
+      return;
+    }
+    submitFeedbackMutation.mutate({
+      orderId: feedbackOrderId,
+      data: {
+        speedRating: feedbackRatings.speed,
+        serviceRating: feedbackRatings.service,
+        tasteRating: feedbackRatings.taste,
+        comment: feedbackComment || undefined,
+      },
+    });
+  };
+
+  const StarRating = ({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) => (
+    <div className="space-y-1">
+      <Label className="text-sm font-medium">{label}</Label>
+      <div className="flex gap-1">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <button
+            key={star}
+            type="button"
+            onClick={() => onChange(star)}
+            className="p-0.5 transition-colors"
+          >
+            <Star
+              className={`w-6 h-6 ${star <= value ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`}
+            />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   const categories = useMemo(() => {
     const cats = new Set(menuItems.map((item) => item.category));
@@ -570,10 +630,18 @@ export default function CustomerMenu({
                                 <span>{new Date(order.createdAt).toLocaleTimeString()}</span>
                               </div>
                             </div>
-                            <Badge variant={order.status === "delivered" ? "outline" : "default"}>
-                              <StatusIcon className="w-3 h-3 mr-1" />
-                              {statusLabels[order.status]}
-                            </Badge>
+                            <div className="flex flex-col items-end gap-1">
+                              <Badge variant={order.status === "delivered" ? "outline" : "default"}>
+                                <StatusIcon className="w-3 h-3 mr-1" />
+                                {statusLabels[order.status]}
+                              </Badge>
+                              {order.paymentStatus === "paid" && (
+                                <Badge variant="outline" className="text-green-600 border-green-300">
+                                  <CheckCircle className="w-3 h-3 mr-1" />
+                                  Paid
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                           <div className="space-y-1 mb-3">
                             {order.items.map((item) => (
@@ -587,6 +655,29 @@ export default function CustomerMenu({
                             <span className="font-semibold">Total</span>
                             <span className="font-bold">${parseFloat(order.totalAmount).toFixed(2)}</span>
                           </div>
+                          {order.paymentStatus === "paid" && !submittedFeedbackOrders.has(order.id) && (
+                            <div className="mt-3 pt-2 border-t">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-full"
+                                onClick={() => {
+                                  setFeedbackOrderId(order.id);
+                                  setFeedbackRatings({ speed: 0, service: 0, taste: 0 });
+                                  setFeedbackComment("");
+                                }}
+                              >
+                                <Star className="w-4 h-4 mr-2" />
+                                Rate Your Order
+                              </Button>
+                            </div>
+                          )}
+                          {submittedFeedbackOrders.has(order.id) && (
+                            <div className="mt-3 pt-2 border-t text-center text-sm text-green-600 flex items-center justify-center gap-1">
+                              <CheckCircle className="w-4 h-4" />
+                              Thanks for your feedback!
+                            </div>
+                          )}
                         </Card>
                       );
                     })
@@ -788,6 +879,56 @@ export default function CustomerMenu({
         }}
         isSaving={updatePreferencesMutation.isPending}
       />
+
+      {/* Feedback Dialog */}
+      <Dialog open={feedbackOrderId !== null} onOpenChange={(open) => { if (!open) setFeedbackOrderId(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Rate Your Order</DialogTitle>
+            <DialogDescription>
+              How was your experience? Rate each category from 1 to 5 stars.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <StarRating
+              label="Speed"
+              value={feedbackRatings.speed}
+              onChange={(v) => setFeedbackRatings((prev) => ({ ...prev, speed: v }))}
+            />
+            <StarRating
+              label="Service"
+              value={feedbackRatings.service}
+              onChange={(v) => setFeedbackRatings((prev) => ({ ...prev, service: v }))}
+            />
+            <StarRating
+              label="Taste"
+              value={feedbackRatings.taste}
+              onChange={(v) => setFeedbackRatings((prev) => ({ ...prev, taste: v }))}
+            />
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Comment (optional)</Label>
+              <Textarea
+                placeholder="Any additional feedback..."
+                value={feedbackComment}
+                onChange={(e) => setFeedbackComment(e.target.value)}
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFeedbackOrderId(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitFeedback}
+              disabled={submitFeedbackMutation.isPending}
+            >
+              {submitFeedbackMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Submit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

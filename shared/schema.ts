@@ -217,8 +217,11 @@ export const orderItemModifiers = pgTable("order_item_modifiers", {
 export const feedback = pgTable("feedback", {
   id: serial("id").primaryKey(),
   orderId: integer("order_id").notNull().references(() => orderTickets.id, { onDelete: "cascade" }).unique(),
-  rating: integer("rating"),
+  speedRating: integer("speed_rating").notNull(),
+  serviceRating: integer("service_rating").notNull(),
+  tasteRating: integer("taste_rating").notNull(),
   comment: text("comment"),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 // Table Calls (when customer calls waiter)
@@ -246,6 +249,7 @@ export const insertTableCallSchema = createInsertSchema(tableCalls).omit({ id: t
 export const insertRestaurantSchema = createInsertSchema(restaurants).omit({ id: true, createdAt: true });
 export const insertCustomerPreferencesSchema = createInsertSchema(customerPreferences).omit({ id: true, updatedAt: true });
 export const insertStaffRestaurantAssignmentSchema = createInsertSchema(staffRestaurantAssignments).omit({ id: true, requestedAt: true, approvedAt: true, revokedAt: true });
+export const insertFeedbackSchema = createInsertSchema(feedback).omit({ id: true, createdAt: true });
 
 // Types
 export type InsertStaff = z.infer<typeof insertStaffSchema>;
@@ -273,6 +277,8 @@ export type CustomerPreference = typeof customerPreferences.$inferSelect;
 export type InsertCustomerPreference = z.infer<typeof insertCustomerPreferencesSchema>;
 export type StaffRestaurantAssignment = typeof staffRestaurantAssignments.$inferSelect;
 export type InsertStaffRestaurantAssignment = z.infer<typeof insertStaffRestaurantAssignmentSchema>;
+export type Feedback = typeof feedback.$inferSelect;
+export type InsertFeedback = z.infer<typeof insertFeedbackSchema>;
 
 // API Request/Response Schemas
 export const staffSignUpSchema = z.object({
@@ -383,6 +389,13 @@ export const staffApprovalSchema = z.object({
   action: z.enum(["approve", "revoke"]),
 });
 
+export const submitFeedbackSchema = z.object({
+  speedRating: z.number().min(1).max(5),
+  serviceRating: z.number().min(1).max(5),
+  tasteRating: z.number().min(1).max(5),
+  comment: z.string().optional(),
+});
+
 export type StaffSignUpRequest = z.infer<typeof staffSignUpSchema>;
 export type StaffSignInRequest = z.infer<typeof staffSignInSchema>;
 export type CustomerSignUpRequest = z.infer<typeof customerSignUpSchema>;
@@ -396,6 +409,7 @@ export type OwnerStaffSignUpRequest = z.infer<typeof ownerStaffSignUpSchema>;
 export type StaffJoinRestaurantRequest = z.infer<typeof staffJoinRestaurantSchema>;
 export type UpdateCustomerPreferencesRequest = z.infer<typeof updateCustomerPreferencesSchema>;
 export type StaffApprovalRequest = z.infer<typeof staffApprovalSchema>;
+export type SubmitFeedbackRequest = z.infer<typeof submitFeedbackSchema>;
 
 // Preference options for myFilter UI
 export const DIETARY_RESTRICTIONS = [

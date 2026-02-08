@@ -17,6 +17,7 @@ import {
   staffJoinRestaurantSchema,
   updateCustomerPreferencesSchema,
   staffApprovalSchema,
+  submitFeedbackSchema,
 } from "@shared/schema";
 
 declare module "express-session" {
@@ -557,6 +558,74 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       const days = parseInt(req.query.days as string) || 7;
       const data = await storage.getDailyRevenue(days);
       res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============ FEEDBACK ============
+  app.post("/api/orders/:id/feedback", async (req, res) => {
+    try {
+      if (req.session.userType !== "customer" || !req.session.customerId) {
+        return res.status(401).json({ error: "Customer authentication required" });
+      }
+
+      const orderId = parseInt(req.params.id);
+      const data = submitFeedbackSchema.parse(req.body);
+
+      // Verify the order exists and belongs to this customer
+      const order = await storage.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      if (order.customerId !== req.session.customerId) {
+        return res.status(403).json({ error: "You can only rate your own orders" });
+      }
+      if (order.paymentStatus !== "paid") {
+        return res.status(400).json({ error: "You can only rate paid orders" });
+      }
+
+      // Check if feedback already submitted
+      const existing = await storage.getFeedbackByOrder(orderId);
+      if (existing) {
+        return res.status(400).json({ error: "Feedback already submitted for this order" });
+      }
+
+      const feedback = await storage.createFeedback({
+        orderId,
+        speedRating: data.speedRating,
+        serviceRating: data.serviceRating,
+        tasteRating: data.tasteRating,
+        comment: data.comment || null,
+      });
+
+      res.json(feedback);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to submit feedback" });
+    }
+  });
+
+  app.get("/api/orders/:id/feedback", async (req, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      const fb = await storage.getFeedbackByOrder(orderId);
+      res.json(fb || null);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/analytics/feedback", async (req, res) => {
+    try {
+      const [aggregated, recent] = await Promise.all([
+        storage.getAggregatedFeedback(),
+        storage.getRecentFeedback(20),
+      ]);
+
+      res.json({
+        ...aggregated,
+        recentFeedback: recent,
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

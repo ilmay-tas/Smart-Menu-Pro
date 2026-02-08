@@ -21,7 +21,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu } from "lucide-react";
+import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -97,14 +97,34 @@ interface Restaurant {
   isActive: boolean | null;
 }
 
+interface FeedbackEntry {
+  id: number;
+  orderId: number;
+  speedRating: number;
+  serviceRating: number;
+  tasteRating: number;
+  comment: string | null;
+  createdAt: string;
+  orderNumber: string;
+  tableNumber: number | null;
+}
+
+interface FeedbackSummary {
+  avgSpeed: number;
+  avgService: number;
+  avgTaste: number;
+  totalReviews: number;
+  recentFeedback: FeedbackEntry[];
+}
+
 interface OwnerDashboardProps {
   userName?: string;
   onLogout: () => void;
-  initialTab?: "analytics" | "staff" | "menu";
+  initialTab?: "analytics" | "staff" | "menu" | "feedback";
 }
 
 export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout, initialTab = "analytics" }: OwnerDashboardProps) {
-  const [activeTab, setActiveTab] = useState<"analytics" | "staff" | "menu">(initialTab);
+  const [activeTab, setActiveTab] = useState<"analytics" | "staff" | "menu" | "feedback">(initialTab);
   const [isMenuDialogOpen, setIsMenuDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [stableRestaurantId, setStableRestaurantId] = useState<number | null>(null);
@@ -149,6 +169,11 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const { data: staffAssignments = [], isLoading: staffLoading } = useQuery<StaffAssignment[]>({
     queryKey: ["/api/restaurants", restaurantId, "staff"],
     enabled: activeTab === "staff" && !!restaurantId,
+  });
+
+  const { data: feedbackData, isLoading: feedbackLoading } = useQuery<FeedbackSummary>({
+    queryKey: ["/api/analytics/feedback"],
+    enabled: activeTab === "feedback",
   });
 
   const { data: menuData, isLoading: menuLoading } = useQuery<{ items: MenuItem[]; categories: Category[] }>({
@@ -376,7 +401,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
             <ThemeToggle />
           </header>
           <main className="flex-1 overflow-auto p-4">
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "analytics" | "staff" | "menu")}>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "analytics" | "staff" | "menu" | "feedback")}>
               <TabsList className="mb-6">
                 <TabsTrigger value="analytics" data-testid="tab-analytics">Analytics</TabsTrigger>
                 <TabsTrigger value="staff" data-testid="tab-staff">
@@ -387,6 +412,12 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                 </TabsTrigger>
                 <TabsTrigger value="menu" data-testid="tab-menu">
                   Menu Management
+                </TabsTrigger>
+                <TabsTrigger value="feedback" data-testid="tab-feedback">
+                  Feedback
+                  {feedbackData && feedbackData.totalReviews > 0 && (
+                    <Badge variant="secondary" className="ml-2">{feedbackData.totalReviews}</Badge>
+                  )}
                 </TabsTrigger>
               </TabsList>
 
@@ -654,6 +685,139 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                       </Card>
                     ))}
                   </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="feedback" className="space-y-6 mt-0">
+                {feedbackLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : !feedbackData || feedbackData.totalReviews === 0 ? (
+                  <Card className="p-8 text-center">
+                    <Star className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <p className="text-muted-foreground">No feedback received yet</p>
+                    <p className="text-sm text-muted-foreground mt-2">Customer reviews will appear here after they rate their orders</p>
+                  </Card>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <Card className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-full bg-yellow-100 dark:bg-yellow-900/30">
+                            <Star className="w-5 h-5 text-yellow-500" />
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Avg Speed</p>
+                            <p className="text-2xl font-bold">{feedbackData.avgSpeed.toFixed(1)}</p>
+                            <div className="flex gap-0.5 mt-1">
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <Star key={s} className={`w-3 h-3 ${s <= Math.round(feedbackData.avgSpeed) ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                      <Card className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-full bg-blue-100 dark:bg-blue-900/30">
+                            <Users className="w-5 h-5 text-blue-500" />
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Avg Service</p>
+                            <p className="text-2xl font-bold">{feedbackData.avgService.toFixed(1)}</p>
+                            <div className="flex gap-0.5 mt-1">
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <Star key={s} className={`w-3 h-3 ${s <= Math.round(feedbackData.avgService) ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                      <Card className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-full bg-green-100 dark:bg-green-900/30">
+                            <UtensilsCrossed className="w-5 h-5 text-green-500" />
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Avg Taste</p>
+                            <p className="text-2xl font-bold">{feedbackData.avgTaste.toFixed(1)}</p>
+                            <div className="flex gap-0.5 mt-1">
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <Star key={s} className={`w-3 h-3 ${s <= Math.round(feedbackData.avgTaste) ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                      <Card className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-full bg-purple-100 dark:bg-purple-900/30">
+                            <MessageSquare className="w-5 h-5 text-purple-500" />
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">Total Reviews</p>
+                            <p className="text-2xl font-bold">{feedbackData.totalReviews}</p>
+                          </div>
+                        </div>
+                      </Card>
+                    </div>
+
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <MessageSquare className="w-5 h-5" />
+                          Recent Reviews
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {feedbackData.recentFeedback.map((fb) => (
+                          <div key={fb.id} className="p-3 rounded-md bg-muted/50 space-y-2">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">Order #{fb.orderNumber}</span>
+                                {fb.tableNumber && (
+                                  <Badge variant="outline">Table {fb.tableNumber}</Badge>
+                                )}
+                              </div>
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(fb.createdAt).toLocaleDateString()} {new Date(fb.createdAt).toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <div className="flex gap-4 text-sm flex-wrap">
+                              <div className="flex items-center gap-1">
+                                <span className="text-muted-foreground">Speed:</span>
+                                <div className="flex gap-0.5">
+                                  {[1, 2, 3, 4, 5].map((s) => (
+                                    <Star key={s} className={`w-3 h-3 ${s <= fb.speedRating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-muted-foreground">Service:</span>
+                                <div className="flex gap-0.5">
+                                  {[1, 2, 3, 4, 5].map((s) => (
+                                    <Star key={s} className={`w-3 h-3 ${s <= fb.serviceRating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-muted-foreground">Taste:</span>
+                                <div className="flex gap-0.5">
+                                  {[1, 2, 3, 4, 5].map((s) => (
+                                    <Star key={s} className={`w-3 h-3 ${s <= fb.tasteRating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                            {fb.comment && (
+                              <p className="text-sm italic text-muted-foreground">"{fb.comment}"</p>
+                            )}
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  </>
                 )}
               </TabsContent>
             </Tabs>
