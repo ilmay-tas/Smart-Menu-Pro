@@ -243,15 +243,13 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
                     data-testid="input-staff-password"
                     disabled={isLoading}
                   />
-                  <Button
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-full"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     onClick={() => setShowPassword(!showPassword)}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </Button>
+                  </button>
                 </div>
               </div>
               <Button type="submit" className="w-full" data-testid="button-staff-signin" disabled={isLoading}>
@@ -321,15 +319,13 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
                     data-testid="input-staff-signup-password"
                     disabled={isLoading}
                   />
-                  <Button
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-full"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     onClick={() => setShowPassword(!showPassword)}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </Button>
+                  </button>
                 </div>
               </div>
 

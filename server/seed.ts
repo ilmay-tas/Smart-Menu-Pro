@@ -276,6 +276,51 @@ export async function seedDatabase() {
     categoryMap[cat.name] = created.id;
   }
 
+  // Seed staff users (before restaurant & menu items so we have ownerId)
+  const staffData = [
+    { username: "kitchen1", password: "kitchen123", name: "Kitchen Staff", role: "kitchen" as const },
+    { username: "waiter1", password: "waiter123", name: "Waiter Staff", role: "waiter" as const },
+    { username: "owner1", password: "owner123", name: "Restaurant Owner", role: "owner" as const },
+  ];
+
+  let ownerId: number | null = null;
+  const existingStaff = await db.select().from(staff);
+  if (existingStaff.length === 0) {
+    for (const staffUser of staffData) {
+      const passwordHash = await bcrypt.hash(staffUser.password, 10);
+      const [created] = await db.insert(staff).values({
+        username: staffUser.username,
+        passwordHash,
+        name: staffUser.name,
+        role: staffUser.role,
+      }).returning();
+      
+      if (staffUser.role === "owner") {
+        ownerId = created.id;
+      }
+    }
+  } else {
+    ownerId = existingStaff.find((user) => user.role === "owner")?.id ?? null;
+  }
+
+  // Seed default restaurant for owner (before menu items so we have restaurantId)
+  let restaurantId: number | null = null;
+  const existingRestaurants = await db.select().from(restaurants);
+  if (existingRestaurants.length > 0) {
+    restaurantId = existingRestaurants[0].id;
+  } else if (ownerId) {
+    const [created] = await db.insert(restaurants).values({
+      name: "MyDine Restaurant",
+      address: "123 Main Street, Foodville, CA 90210",
+      phone: "(555) 123-4567",
+      email: "info@mydine.com",
+      description: "A wonderful dining experience with great food and service",
+      ownerId: ownerId,
+      isActive: true,
+    }).returning();
+    restaurantId = created.id;
+  }
+
   // Seed menu items
   const existingItems = await db.select({
     id: menuItems.id,
@@ -308,6 +353,7 @@ export async function seedDatabase() {
     const [created] = await db.insert(menuItems).values({
       ...menuItem,
       categoryId: categoryMap[category],
+      restaurantId: restaurantId,
     }).returning();
     
     // Add modifiers
@@ -326,47 +372,6 @@ export async function seedDatabase() {
     for (let i = 1; i <= 12; i++) {
       await db.insert(restaurantTables).values({ tableNumber: i });
     }
-  }
-
-  // Seed staff users
-  const staffData = [
-    { username: "kitchen1", password: "kitchen123", name: "Kitchen Staff", role: "kitchen" as const },
-    { username: "waiter1", password: "waiter123", name: "Waiter Staff", role: "waiter" as const },
-    { username: "owner1", password: "owner123", name: "Restaurant Owner", role: "owner" as const },
-  ];
-
-  let ownerId: number | null = null;
-  const existingStaff = await db.select().from(staff);
-  if (existingStaff.length === 0) {
-    for (const staffUser of staffData) {
-      const passwordHash = await bcrypt.hash(staffUser.password, 10);
-      const [created] = await db.insert(staff).values({
-        username: staffUser.username,
-        passwordHash,
-        name: staffUser.name,
-        role: staffUser.role,
-      }).returning();
-      
-      if (staffUser.role === "owner") {
-        ownerId = created.id;
-      }
-    }
-  } else {
-    ownerId = existingStaff.find((user) => user.role === "owner")?.id ?? null;
-  }
-
-  // Seed default restaurant for owner
-  const existingRestaurants = await db.select().from(restaurants);
-  if (ownerId && existingRestaurants.length === 0) {
-    await db.insert(restaurants).values({
-      name: "MyDine Restaurant",
-      address: "123 Main Street, Foodville, CA 90210",
-      phone: "(555) 123-4567",
-      email: "info@mydine.com",
-      description: "A wonderful dining experience with great food and service",
-      ownerId: ownerId,
-      isActive: true,
-    });
   }
 
   console.log("Database seeded successfully!");
