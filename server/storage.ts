@@ -14,6 +14,7 @@ import {
   customerPreferences,
   staffRestaurantAssignments,
   feedback,
+  specialOffers,
   type Staff,
   type InsertStaff,
   type Customer,
@@ -35,6 +36,8 @@ import {
   type InsertStaffRestaurantAssignment,
   type Feedback,
   type InsertFeedback,
+  type SpecialOffer,
+  type InsertSpecialOffer,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -62,7 +65,10 @@ export interface IStorage {
 
   // Categories
   getCategories(): Promise<Category[]>;
-  createCategory(name: string): Promise<Category>;
+  getCategoriesByRestaurant(restaurantId: number): Promise<Category[]>;
+  createCategory(name: string, restaurantId?: number): Promise<Category>;
+  updateCategory(id: number, name: string): Promise<Category | undefined>;
+  deleteCategory(id: number): Promise<boolean>;
 
   // Tables
   getTables(): Promise<RestaurantTable[]>;
@@ -131,6 +137,14 @@ export interface IStorage {
   getFeedbackByOrder(orderId: number): Promise<Feedback | undefined>;
   getAggregatedFeedback(): Promise<{ avgSpeed: number; avgService: number; avgTaste: number; totalReviews: number }>;
   getRecentFeedback(limit: number): Promise<(Feedback & { orderNumber: string; tableNumber: number | null })[]>;
+
+  // Special Offers
+  getOffersByRestaurant(restaurantId: number): Promise<SpecialOffer[]>;
+  getActiveOffersByRestaurant(restaurantId: number): Promise<SpecialOffer[]>;
+  getAllActiveOffers(): Promise<SpecialOffer[]>;
+  createOffer(data: InsertSpecialOffer): Promise<SpecialOffer>;
+  updateOffer(id: number, data: Partial<InsertSpecialOffer>): Promise<SpecialOffer | undefined>;
+  deleteOffer(id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -213,9 +227,25 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(categories);
   }
 
-  async createCategory(name: string): Promise<Category> {
-    const [created] = await db.insert(categories).values({ name }).returning();
+  async getCategoriesByRestaurant(restaurantId: number): Promise<Category[]> {
+    return db.select().from(categories).where(eq(categories.restaurantId, restaurantId));
+  }
+
+  async createCategory(name: string, restaurantId?: number): Promise<Category> {
+    const [created] = await db.insert(categories).values({ name, restaurantId: restaurantId ?? null }).returning();
     return created;
+  }
+
+  async updateCategory(id: number, name: string): Promise<Category | undefined> {
+    const [updated] = await db.update(categories).set({ name }).where(eq(categories.id, id)).returning();
+    return updated;
+  }
+
+  async deleteCategory(id: number): Promise<boolean> {
+    // Set menuItems with this category to null
+    await db.update(menuItems).set({ categoryId: null }).where(eq(menuItems.categoryId, id));
+    await db.delete(categories).where(eq(categories.id, id));
+    return true;
   }
 
   // Tables
@@ -638,6 +668,52 @@ export class DatabaseStorage implements IStorage {
     const ids = popularItemIds.map(p => p.menuItemId);
     return db.select().from(menuItems)
       .where(sql`${menuItems.id} = ANY(${ids})`);
+  }
+  // Special Offers
+  async getOffersByRestaurant(restaurantId: number): Promise<SpecialOffer[]> {
+    return db.select().from(specialOffers)
+      .where(eq(specialOffers.restaurantId, restaurantId))
+      .orderBy(desc(specialOffers.createdAt));
+  }
+
+  async getActiveOffersByRestaurant(restaurantId: number): Promise<SpecialOffer[]> {
+    const now = new Date();
+    return db.select().from(specialOffers)
+      .where(
+        and(
+          eq(specialOffers.restaurantId, restaurantId),
+          eq(specialOffers.isActive, true),
+          sql`(${specialOffers.startDate} IS NULL OR ${specialOffers.startDate} <= ${now})`,
+          sql`(${specialOffers.endDate} IS NULL OR ${specialOffers.endDate} >= ${now})`
+        )
+      );
+  }
+
+  async getAllActiveOffers(): Promise<SpecialOffer[]> {
+    const now = new Date();
+    return db.select().from(specialOffers)
+      .where(
+        and(
+          eq(specialOffers.isActive, true),
+          sql`(${specialOffers.startDate} IS NULL OR ${specialOffers.startDate} <= ${now})`,
+          sql`(${specialOffers.endDate} IS NULL OR ${specialOffers.endDate} >= ${now})`
+        )
+      );
+  }
+
+  async createOffer(data: InsertSpecialOffer): Promise<SpecialOffer> {
+    const [created] = await db.insert(specialOffers).values(data).returning();
+    return created;
+  }
+
+  async updateOffer(id: number, data: Partial<InsertSpecialOffer>): Promise<SpecialOffer | undefined> {
+    const [updated] = await db.update(specialOffers).set(data).where(eq(specialOffers.id, id)).returning();
+    return updated;
+  }
+
+  async deleteOffer(id: number): Promise<boolean> {
+    await db.delete(specialOffers).where(eq(specialOffers.id, id));
+    return true;
   }
 }
 

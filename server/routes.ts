@@ -2,8 +2,36 @@ import type { Express } from "express";
 import type { Server } from "http";
 import session from "express-session";
 import bcrypt from "bcryptjs";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { storage } from "./storage";
 import { seedDatabase } from "./seed";
+
+// Configure multer for menu image uploads
+const uploadsDir = path.resolve(process.cwd(), "uploads", "menu-images");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      const ext = path.extname(file.originalname);
+      cb(null, `menu-${uniqueSuffix}${ext}`);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (_req, file, cb) => {
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only JPEG, PNG, WebP and GIF images are allowed"));
+    }
+  },
+});
 import {
   staffSignUpSchema,
   staffSignInSchema,
@@ -26,6 +54,7 @@ declare module "express-session" {
     staffRole: string;
     customerId: number;
     userType: "staff" | "customer";
+    restaurantId: number;
   }
 }
 
@@ -191,12 +220,30 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // ============ MENU ============
   app.get("/api/menu", async (req, res) => {
     try {
-      const items = await storage.getMenuItems();
-      const cats = await storage.getCategories();
+      // Determine restaurant: use query param, session, or find the first active restaurant
+      let restaurantId: number | null = null;
+      if (req.query.restaurantId) {
+        restaurantId = parseInt(req.query.restaurantId as string);
+      } else if (req.session.restaurantId) {
+        restaurantId = req.session.restaurantId;
+      } else {
+        // Fallback: find the first active restaurant
+        const allRestaurants = await storage.getRestaurants();
+        const active = allRestaurants.find((r) => r.isActive);
+        if (active) restaurantId = active.id;
+      }
+
+      const items = restaurantId
+        ? await storage.getMenuItemsByRestaurant(restaurantId)
+        : await storage.getMenuItems();
+      const nonSoldOut = items.filter((item) => !item.isSoldOut);
+      const cats = restaurantId
+        ? await storage.getCategoriesByRestaurant(restaurantId)
+        : await storage.getCategories();
       const categoryMap = Object.fromEntries(cats.map((c) => [c.id, c.name]));
       
       const itemsWithDetails = await Promise.all(
-        items.map(async (item) => {
+        nonSoldOut.map(async (item) => {
           const mods = await storage.getModifiersForItem(item.id);
           return {
             id: String(item.id),
@@ -206,6 +253,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             image: item.imageUrl || "/menu/default.png",
             category: item.categoryId ? categoryMap[item.categoryId] || "Other" : "Other",
             isVegan: item.isVegan,
+            isVegetarian: item.isVegetarian,
             isGlutenFree: item.isGlutenFree,
             isSpicy: item.isSpicy,
             allergens: item.allergens,
@@ -227,6 +275,145 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     try {
       const cats = await storage.getCategories();
       res.json(cats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/restaurants/:id/categories", async (req, res) => {
+    try {
+      const restaurantId = parseInt(req.params.id);
+      const cats = await storage.getCategoriesByRestaurant(restaurantId);
+      res.json(cats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/restaurants/:id/categories", async (req, res) => {
+    try {
+      const restaurantId = parseInt(req.params.id);
+      const { name } = req.body;
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: "Category name is required" });
+      }
+      const cat = await storage.createCategory(name.trim(), restaurantId);
+      res.status(201).json(cat);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/restaurants/:id/categories/:catId", async (req, res) => {
+    try {
+      const catId = parseInt(req.params.catId);
+      const { name } = req.body;
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: "Category name is required" });
+      }
+      const updated = await storage.updateCategory(catId, name.trim());
+      if (!updated) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/restaurants/:id/categories/:catId", async (req, res) => {
+    try {
+      const catId = parseInt(req.params.catId);
+      await storage.deleteCategory(catId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============ SPECIAL OFFERS ============
+  app.get("/api/offers/active", async (req, res) => {
+    try {
+      const offers = await storage.getAllActiveOffers();
+      res.json(offers);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/restaurants/:id/offers", async (req, res) => {
+    try {
+      const restaurantId = parseInt(req.params.id);
+      const offers = await storage.getOffersByRestaurant(restaurantId);
+      res.json(offers);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/restaurants/:id/offers/active", async (req, res) => {
+    try {
+      const restaurantId = parseInt(req.params.id);
+      const offers = await storage.getActiveOffersByRestaurant(restaurantId);
+      res.json(offers);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/restaurants/:id/offers", async (req, res) => {
+    try {
+      const restaurantId = parseInt(req.params.id);
+      const { title, description, discountType, discountValue, menuItemId, isActive, startDate, endDate } = req.body;
+      if (!title || !discountType || discountValue === undefined) {
+        return res.status(400).json({ error: "Title, discount type, and discount value are required" });
+      }
+      const offer = await storage.createOffer({
+        restaurantId,
+        title,
+        description: description || null,
+        discountType,
+        discountValue: discountValue.toString(),
+        menuItemId: menuItemId || null,
+        isActive: isActive !== undefined ? isActive : true,
+        startDate: startDate ? new Date(startDate) : null,
+        endDate: endDate ? new Date(endDate) : null,
+      });
+      res.status(201).json(offer);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/restaurants/:id/offers/:offerId", async (req, res) => {
+    try {
+      const offerId = parseInt(req.params.offerId);
+      const { title, description, discountType, discountValue, menuItemId, isActive, startDate, endDate } = req.body;
+      const updateData: any = {};
+      if (title !== undefined) updateData.title = title;
+      if (description !== undefined) updateData.description = description;
+      if (discountType !== undefined) updateData.discountType = discountType;
+      if (discountValue !== undefined) updateData.discountValue = discountValue.toString();
+      if (menuItemId !== undefined) updateData.menuItemId = menuItemId;
+      if (isActive !== undefined) updateData.isActive = isActive;
+      if (startDate !== undefined) updateData.startDate = startDate ? new Date(startDate) : null;
+      if (endDate !== undefined) updateData.endDate = endDate ? new Date(endDate) : null;
+
+      const updated = await storage.updateOffer(offerId, updateData);
+      if (!updated) {
+        return res.status(404).json({ error: "Offer not found" });
+      }
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/restaurants/:id/offers/:offerId", async (req, res) => {
+    try {
+      const offerId = parseInt(req.params.offerId);
+      await storage.deleteOffer(offerId);
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -810,6 +997,19 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
+  // ============ IMAGE UPLOAD ============
+  app.post("/api/upload/menu-image", upload.single("image"), (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
+      const imageUrl = `/uploads/menu-images/${req.file.filename}`;
+      res.json({ imageUrl });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ============ OWNER: MENU MANAGEMENT ============
   app.get("/api/restaurants/:id/menu", async (req, res) => {
     try {
@@ -825,7 +1025,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const items = await storage.getMenuItemsByRestaurant(restaurantId);
-      const cats = await storage.getCategories();
+      const cats = await storage.getCategoriesByRestaurant(restaurantId);
       res.json({ items, categories: cats });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1096,8 +1296,25 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // ============ MENU WITH FILTER ============
   app.get("/api/menu/filtered", async (req, res) => {
     try {
-      const items = await storage.getMenuItems();
-      const cats = await storage.getCategories();
+      // Determine restaurant context
+      let restaurantId: number | null = null;
+      if (req.query.restaurantId) {
+        restaurantId = parseInt(req.query.restaurantId as string);
+      } else if (req.session.restaurantId) {
+        restaurantId = req.session.restaurantId;
+      } else {
+        const allRestaurants = await storage.getRestaurants();
+        const active = allRestaurants.find((r) => r.isActive);
+        if (active) restaurantId = active.id;
+      }
+
+      const rawItems = restaurantId
+        ? await storage.getMenuItemsByRestaurant(restaurantId)
+        : await storage.getMenuItems();
+      const items = rawItems.filter((item) => !item.isSoldOut);
+      const cats = restaurantId
+        ? await storage.getCategoriesByRestaurant(restaurantId)
+        : await storage.getCategories();
       const categoryMap = Object.fromEntries(cats.map((c) => [c.id, c.name]));
 
       let filteredItems = items;

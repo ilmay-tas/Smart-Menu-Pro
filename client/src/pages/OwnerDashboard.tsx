@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import StaffSidebar from "@/components/layout/StaffSidebar";
@@ -21,7 +21,14 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare, X, Check, Tag, Upload, ImagePlus } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -83,6 +90,7 @@ interface MenuItem {
 interface Category {
   id: number;
   name: string;
+  restaurantId: number | null;
 }
 
 interface Restaurant {
@@ -95,6 +103,20 @@ interface Restaurant {
   logoUrl: string | null;
   ownerId: number | null;
   isActive: boolean | null;
+}
+
+interface SpecialOffer {
+  id: number;
+  restaurantId: number;
+  menuItemId: number | null;
+  title: string;
+  description: string | null;
+  discountType: "percentage" | "fixed_amount" | "bogo";
+  discountValue: string;
+  isActive: boolean | null;
+  startDate: string | null;
+  endDate: string | null;
+  createdAt: string;
 }
 
 interface FeedbackEntry {
@@ -134,11 +156,31 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     price: "",
     imageUrl: "",
     calories: "",
+    categoryId: "" as string,
     isVegan: false,
     isVegetarian: false,
     isGlutenFree: false,
     isSpicy: false,
     isSoldOut: false,
+  });
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isOfferDialogOpen, setIsOfferDialogOpen] = useState(false);
+  const [editingOffer, setEditingOffer] = useState<SpecialOffer | null>(null);
+  const [offerForm, setOfferForm] = useState({
+    title: "",
+    description: "",
+    discountType: "percentage" as "percentage" | "fixed_amount" | "bogo",
+    discountValue: "",
+    menuItemId: "" as string,
+    isActive: true,
+    startDate: "",
+    endDate: "",
   });
   const { toast } = useToast();
 
@@ -181,7 +223,19 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     enabled: activeTab === "menu" && !!restaurantId,
   });
 
+  const { data: offersData = [], isLoading: offersLoading } = useQuery<SpecialOffer[]>({
+    queryKey: ["/api/restaurants", restaurantId, "offers"],
+    enabled: activeTab === "menu" && !!restaurantId,
+  });
+
   const menuItems = menuData?.items || [];
+  const menuCategories = menuData?.categories || [];
+
+  const filteredMenuItems = selectedCategoryFilter === "all"
+    ? menuItems
+    : selectedCategoryFilter === "uncategorized"
+    ? menuItems.filter((item) => !item.categoryId)
+    : menuItems.filter((item) => item.categoryId === parseInt(selectedCategoryFilter));
 
   const approveMutation = useMutation({
     mutationFn: async ({ staffId, action, restId }: { staffId: number; action: "approve" | "revoke"; restId: number }) => {
@@ -211,6 +265,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         price: data.price,
         imageUrl: data.imageUrl || null,
         calories: data.calories ? parseInt(data.calories) : null,
+        categoryId: data.categoryId ? parseInt(data.categoryId) : null,
         isVegan: data.isVegan,
         isVegetarian: data.isVegetarian,
         isGlutenFree: data.isGlutenFree,
@@ -237,6 +292,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         price: data.price,
         imageUrl: data.imageUrl || null,
         calories: data.calories ? parseInt(data.calories) : null,
+        categoryId: data.categoryId ? parseInt(data.categoryId) : null,
         isVegan: data.isVegan,
         isVegetarian: data.isVegetarian,
         isGlutenFree: data.isGlutenFree,
@@ -269,6 +325,193 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     },
   });
 
+  const createCategoryMutation = useMutation({
+    mutationFn: async ({ name, restId }: { name: string; restId: number }) => {
+      return apiRequest("POST", `/api/restaurants/${restId}/categories`, { name });
+    },
+    onSuccess: (_, { restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
+      toast({ title: "Category Created", description: "New category has been added." });
+      setNewCategoryName("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateCategoryMutation = useMutation({
+    mutationFn: async ({ catId, name, restId }: { catId: number; name: string; restId: number }) => {
+      return apiRequest("PUT", `/api/restaurants/${restId}/categories/${catId}`, { name });
+    },
+    onSuccess: (_, { restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
+      toast({ title: "Category Updated", description: "Category has been renamed." });
+      setEditingCategoryId(null);
+      setEditingCategoryName("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: async ({ catId, restId }: { catId: number; restId: number }) => {
+      return apiRequest("DELETE", `/api/restaurants/${restId}/categories/${catId}`);
+    },
+    onSuccess: (_, { restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
+      toast({ title: "Category Deleted", description: "Category has been removed. Items have been uncategorized." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const createOfferMutation = useMutation({
+    mutationFn: async ({ data, restId }: { data: typeof offerForm; restId: number }) => {
+      return apiRequest("POST", `/api/restaurants/${restId}/offers`, {
+        title: data.title,
+        description: data.description || null,
+        discountType: data.discountType,
+        discountValue: parseFloat(data.discountValue),
+        menuItemId: data.menuItemId ? parseInt(data.menuItemId) : null,
+        isActive: data.isActive,
+        startDate: data.startDate || null,
+        endDate: data.endDate || null,
+      });
+    },
+    onSuccess: (_, { restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "offers"] });
+      toast({ title: "Offer Created", description: "New special offer has been added." });
+      setIsOfferDialogOpen(false);
+      resetOfferForm();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateOfferMutation = useMutation({
+    mutationFn: async ({ id, data, restId }: { id: number; data: typeof offerForm; restId: number }) => {
+      return apiRequest("PUT", `/api/restaurants/${restId}/offers/${id}`, {
+        title: data.title,
+        description: data.description || null,
+        discountType: data.discountType,
+        discountValue: parseFloat(data.discountValue),
+        menuItemId: data.menuItemId ? parseInt(data.menuItemId) : null,
+        isActive: data.isActive,
+        startDate: data.startDate || null,
+        endDate: data.endDate || null,
+      });
+    },
+    onSuccess: (_, { restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "offers"] });
+      toast({ title: "Offer Updated", description: "Special offer has been updated." });
+      setIsOfferDialogOpen(false);
+      setEditingOffer(null);
+      resetOfferForm();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteOfferMutation = useMutation({
+    mutationFn: async ({ id, restId }: { id: number; restId: number }) => {
+      return apiRequest("DELETE", `/api/restaurants/${restId}/offers/${id}`);
+    },
+    onSuccess: (_, { restId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "offers"] });
+      toast({ title: "Offer Deleted", description: "Special offer has been removed." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const resetOfferForm = () => {
+    setOfferForm({
+      title: "",
+      description: "",
+      discountType: "percentage",
+      discountValue: "",
+      menuItemId: "",
+      isActive: true,
+      startDate: "",
+      endDate: "",
+    });
+  };
+
+  const openCreateOfferDialog = () => {
+    setEditingOffer(null);
+    resetOfferForm();
+    setIsOfferDialogOpen(true);
+  };
+
+  const openEditOfferDialog = (offer: SpecialOffer) => {
+    setEditingOffer(offer);
+    setOfferForm({
+      title: offer.title,
+      description: offer.description || "",
+      discountType: offer.discountType,
+      discountValue: offer.discountValue,
+      menuItemId: offer.menuItemId?.toString() || "",
+      isActive: offer.isActive ?? true,
+      startDate: offer.startDate ? offer.startDate.split("T")[0] : "",
+      endDate: offer.endDate ? offer.endDate.split("T")[0] : "",
+    });
+    setIsOfferDialogOpen(true);
+  };
+
+  const handleOfferSubmit = () => {
+    if (!restaurantId) {
+      toast({ title: "Error", description: "Restaurant not loaded yet.", variant: "destructive" });
+      return;
+    }
+    if (!offerForm.title || !offerForm.discountValue) {
+      toast({ title: "Error", description: "Title and discount value are required", variant: "destructive" });
+      return;
+    }
+    if (editingOffer) {
+      updateOfferMutation.mutate({ id: editingOffer.id, data: offerForm, restId: restaurantId });
+    } else {
+      createOfferMutation.mutate({ data: offerForm, restId: restaurantId });
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Show local preview immediately
+    const reader = new FileReader();
+    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+
+    // Upload to server
+    setIsUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch("/api/upload/menu-image", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Upload failed");
+      }
+      const { imageUrl } = await res.json();
+      setMenuForm((prev) => ({ ...prev, imageUrl }));
+      toast({ title: "Image Uploaded", description: "Image has been uploaded successfully." });
+    } catch (error: any) {
+      toast({ title: "Upload Failed", description: error.message, variant: "destructive" });
+      setImagePreview(null);
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
   const resetMenuForm = () => {
     setMenuForm({
       name: "",
@@ -276,12 +519,14 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
       price: "",
       imageUrl: "",
       calories: "",
+      categoryId: "",
       isVegan: false,
       isVegetarian: false,
       isGlutenFree: false,
       isSpicy: false,
       isSoldOut: false,
     });
+    setImagePreview(null);
   };
 
   const openCreateDialog = () => {
@@ -292,12 +537,14 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
 
   const openEditDialog = (item: MenuItem) => {
     setEditingItem(item);
+    setImagePreview(item.imageUrl || null);
     setMenuForm({
       name: item.name,
       description: item.description || "",
       price: item.price,
       imageUrl: item.imageUrl || "",
       calories: item.calories?.toString() || "",
+      categoryId: item.categoryId?.toString() || "",
       isVegan: item.isVegan || false,
       isVegetarian: item.isVegetarian || false,
       isGlutenFree: item.isGlutenFree || false,
@@ -616,8 +863,215 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
               </TabsContent>
 
               <TabsContent value="menu" className="space-y-6 mt-0">
+                {/* Category Management Section */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Tag className="w-4 h-4" />
+                      Categories
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-wrap gap-2 items-center">
+                      {menuCategories.map((cat) => (
+                        <div key={cat.id} className="group">
+                          {editingCategoryId === cat.id ? (
+                            <div className="flex items-center gap-1">
+                              <Input
+                                value={editingCategoryName}
+                                onChange={(e) => setEditingCategoryName(e.target.value)}
+                                className="h-8 w-32 text-sm"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && editingCategoryName.trim() && restaurantId) {
+                                    updateCategoryMutation.mutate({ catId: cat.id, name: editingCategoryName.trim(), restId: restaurantId });
+                                  } else if (e.key === "Escape") {
+                                    setEditingCategoryId(null);
+                                    setEditingCategoryName("");
+                                  }
+                                }}
+                              />
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                onClick={() => {
+                                  if (editingCategoryName.trim() && restaurantId) {
+                                    updateCategoryMutation.mutate({ catId: cat.id, name: editingCategoryName.trim(), restId: restaurantId });
+                                  }
+                                }}
+                              >
+                                <Check className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                onClick={() => { setEditingCategoryId(null); setEditingCategoryName(""); }}
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <Badge variant="outline" className="px-3 py-1.5 text-sm flex items-center gap-1.5 cursor-default">
+                              {cat.name}
+                              <button
+                                className="ml-1 opacity-50 hover:opacity-100 transition-opacity"
+                                onClick={() => { setEditingCategoryId(cat.id); setEditingCategoryName(cat.name); }}
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                              <button
+                                className="opacity-50 hover:opacity-100 transition-opacity text-destructive"
+                                onClick={() => {
+                                  if (restaurantId) {
+                                    deleteCategoryMutation.mutate({ catId: cat.id, restId: restaurantId });
+                                  }
+                                }}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </Badge>
+                          )}
+                        </div>
+                      ))}
+                      <div className="flex items-center gap-1">
+                        <Input
+                          value={newCategoryName}
+                          onChange={(e) => setNewCategoryName(e.target.value)}
+                          placeholder="New category..."
+                          className="h-8 w-36 text-sm"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && newCategoryName.trim() && restaurantId) {
+                              createCategoryMutation.mutate({ name: newCategoryName.trim(), restId: restaurantId });
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8"
+                          disabled={!newCategoryName.trim() || createCategoryMutation.isPending}
+                          onClick={() => {
+                            if (newCategoryName.trim() && restaurantId) {
+                              createCategoryMutation.mutate({ name: newCategoryName.trim(), restId: restaurantId });
+                            }
+                          }}
+                        >
+                          <Plus className="w-3 h-3 mr-1" />
+                          Add
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Special Offers Section */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Tag className="w-4 h-4" />
+                        Special Offers
+                      </CardTitle>
+                      <Button size="sm" variant="outline" onClick={openCreateOfferDialog}>
+                        <Plus className="w-3 h-3 mr-1" />
+                        Add Offer
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {offersLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : offersData.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No special offers yet. Create one to attract more customers!
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {offersData.map((offer) => {
+                          const linkedItem = menuItems.find((m) => m.id === offer.menuItemId);
+                          return (
+                            <div
+                              key={offer.id}
+                              className={`border rounded-lg p-3 ${offer.isActive ? "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20" : "border-muted bg-muted/20 opacity-60"}`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="font-semibold text-sm truncate">{offer.title}</h4>
+                                    {offer.isActive ? (
+                                      <Badge variant="default" className="text-xs bg-green-600">Active</Badge>
+                                    ) : (
+                                      <Badge variant="secondary" className="text-xs">Inactive</Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-sm font-medium text-primary mt-1">
+                                    {offer.discountType === "percentage" && `${offer.discountValue}% OFF`}
+                                    {offer.discountType === "fixed_amount" && `$${parseFloat(offer.discountValue).toFixed(2)} OFF`}
+                                    {offer.discountType === "bogo" && "Buy One Get One"}
+                                  </p>
+                                  {linkedItem && (
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      Applies to: {linkedItem.name}
+                                    </p>
+                                  )}
+                                  {offer.description && (
+                                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{offer.description}</p>
+                                  )}
+                                  {(offer.startDate || offer.endDate) && (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {offer.startDate && `From: ${new Date(offer.startDate).toLocaleDateString()}`}
+                                      {offer.startDate && offer.endDate && " — "}
+                                      {offer.endDate && `Until: ${new Date(offer.endDate).toLocaleDateString()}`}
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex gap-1 shrink-0">
+                                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEditOfferDialog(offer)}>
+                                    <Pencil className="w-3 h-3" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 text-destructive"
+                                    onClick={() => deleteOfferMutation.mutate({ id: offer.id, restId: restaurantId! })}
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Menu Items Section */}
                 <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <h2 className="text-lg font-semibold">Menu Items</h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-lg font-semibold">Menu Items</h2>
+                    {menuCategories.length > 0 && (
+                      <Select value={selectedCategoryFilter} onValueChange={setSelectedCategoryFilter}>
+                        <SelectTrigger className="w-[180px] h-9">
+                          <SelectValue placeholder="Filter by category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Categories</SelectItem>
+                          <SelectItem value="uncategorized">Uncategorized</SelectItem>
+                          {menuCategories.map((cat) => (
+                            <SelectItem key={cat.id} value={cat.id.toString()}>
+                              {cat.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
                   <Button onClick={openCreateDialog} data-testid="button-add-menu-item">
                     <Plus className="w-4 h-4 mr-1" />
                     Add Menu Item
@@ -628,62 +1082,78 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
                   </div>
-                ) : menuItems.length === 0 ? (
+                ) : filteredMenuItems.length === 0 ? (
                   <Card className="p-8 text-center">
                     <Menu className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                    <p className="text-muted-foreground">No menu items yet</p>
-                    <p className="text-sm text-muted-foreground mt-2">Add your first menu item to get started</p>
+                    <p className="text-muted-foreground">
+                      {menuItems.length === 0 ? "No menu items yet" : "No items in this category"}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      {menuItems.length === 0 ? "Add your first menu item to get started" : "Try selecting a different category filter"}
+                    </p>
                   </Card>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {menuItems.map((item) => (
-                      <Card key={item.id} className="overflow-hidden" data-testid={`menu-item-${item.id}`}>
-                        {item.imageUrl && (
-                          <div className="h-32 overflow-hidden">
-                            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
-                          </div>
-                        )}
-                        <CardContent className="p-4">
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <h3 className="font-semibold">{item.name}</h3>
-                              <p className="text-lg font-bold text-primary">${parseFloat(item.price).toFixed(2)}</p>
+                    {filteredMenuItems.map((item) => {
+                      const itemCategory = menuCategories.find((c) => c.id === item.categoryId);
+                      const itemOffer = offersData.find((o) => o.menuItemId === item.id && o.isActive);
+                      return (
+                        <Card key={item.id} className="overflow-hidden" data-testid={`menu-item-${item.id}`}>
+                          {item.imageUrl && (
+                            <div className="h-32 overflow-hidden">
+                              <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
                             </div>
-                            {item.isSoldOut && <Badge variant="destructive">Sold Out</Badge>}
-                          </div>
-                          {item.description && (
-                            <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{item.description}</p>
                           )}
-                          <div className="flex gap-1 mt-2 flex-wrap">
-                            {item.isVegan && <Badge variant="secondary">Vegan</Badge>}
-                            {item.isVegetarian && <Badge variant="secondary">Vegetarian</Badge>}
-                            {item.isGlutenFree && <Badge variant="secondary">GF</Badge>}
-                            {item.isSpicy && <Badge variant="secondary">Spicy</Badge>}
-                          </div>
-                          <div className="flex gap-2 mt-4">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => openEditDialog(item)}
-                              data-testid={`button-edit-${item.id}`}
-                            >
-                              <Pencil className="w-4 h-4 mr-1" />
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => deleteMenuMutation.mutate({ id: item.id, restId: restaurantId! })}
-                              disabled={deleteMenuMutation.isPending}
-                              data-testid={`button-delete-${item.id}`}
-                            >
-                              <Trash2 className="w-4 h-4 mr-1" />
-                              Delete
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <h3 className="font-semibold">{item.name}</h3>
+                                <p className="text-lg font-bold text-primary">${parseFloat(item.price).toFixed(2)}</p>
+                              </div>
+                              {item.isSoldOut && <Badge variant="destructive">Sold Out</Badge>}
+                            </div>
+                            {item.description && (
+                              <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{item.description}</p>
+                            )}
+                            <div className="flex gap-1 mt-2 flex-wrap">
+                              {itemOffer && (
+                                <Badge className="bg-orange-500 text-white">
+                                  {itemOffer.discountType === "percentage" && `${itemOffer.discountValue}% OFF`}
+                                  {itemOffer.discountType === "fixed_amount" && `$${parseFloat(itemOffer.discountValue).toFixed(2)} OFF`}
+                                  {itemOffer.discountType === "bogo" && "BOGO"}
+                                </Badge>
+                              )}
+                              {itemCategory && <Badge variant="outline">{itemCategory.name}</Badge>}
+                              {item.isVegan && <Badge variant="secondary">Vegan</Badge>}
+                              {item.isVegetarian && <Badge variant="secondary">Vegetarian</Badge>}
+                              {item.isGlutenFree && <Badge variant="secondary">GF</Badge>}
+                              {item.isSpicy && <Badge variant="secondary">Spicy</Badge>}
+                            </div>
+                            <div className="flex gap-2 mt-4">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openEditDialog(item)}
+                                data-testid={`button-edit-${item.id}`}
+                              >
+                                <Pencil className="w-4 h-4 mr-1" />
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => deleteMenuMutation.mutate({ id: item.id, restId: restaurantId! })}
+                                disabled={deleteMenuMutation.isPending}
+                                data-testid={`button-delete-${item.id}`}
+                              >
+                                <Trash2 className="w-4 h-4 mr-1" />
+                                Delete
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
                   </div>
                 )}
               </TabsContent>
@@ -864,14 +1334,64 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="imageUrl">Image URL</Label>
-              <Input
-                id="imageUrl"
-                value={menuForm.imageUrl}
-                onChange={(e) => setMenuForm({ ...menuForm, imageUrl: e.target.value })}
-                placeholder="https://example.com/image.jpg"
-                data-testid="input-menu-image"
+              <Label>Image</Label>
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={handleImageUpload}
+                className="hidden"
               />
+              {imagePreview || menuForm.imageUrl ? (
+                <div className="relative group">
+                  <img
+                    src={imagePreview || menuForm.imageUrl}
+                    alt="Menu item preview"
+                    className="w-full h-40 object-cover rounded-lg border"
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isUploadingImage}
+                    >
+                      {isUploadingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
+                      Replace
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => {
+                        setMenuForm({ ...menuForm, imageUrl: "" });
+                        setImagePreview(null);
+                      }}
+                    >
+                      <X className="w-4 h-4 mr-1" />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingImage}
+                  className="w-full h-32 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-2 text-muted-foreground hover:border-primary hover:text-primary transition-colors cursor-pointer"
+                >
+                  {isUploadingImage ? (
+                    <Loader2 className="w-8 h-8 animate-spin" />
+                  ) : (
+                    <>
+                      <ImagePlus className="w-8 h-8" />
+                      <span className="text-sm">Click to upload image</span>
+                      <span className="text-xs">JPEG, PNG, WebP or GIF (max 5MB)</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="calories">Calories</Label>
@@ -883,6 +1403,25 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                 type="number"
                 data-testid="input-menu-calories"
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select
+                value={menuForm.categoryId}
+                onValueChange={(val) => setMenuForm({ ...menuForm, categoryId: val === "none" ? "" : val })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Category</SelectItem>
+                  {menuCategories.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id.toString()}>
+                      {cat.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="flex items-center space-x-2">
@@ -945,6 +1484,125 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               )}
               {editingItem ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isOfferDialogOpen} onOpenChange={setIsOfferDialogOpen}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingOffer ? "Edit Special Offer" : "Add Special Offer"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="offerTitle">Title *</Label>
+              <Input
+                id="offerTitle"
+                value={offerForm.title}
+                onChange={(e) => setOfferForm({ ...offerForm, title: e.target.value })}
+                placeholder="e.g. Deal of the Day"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="offerDescription">Description</Label>
+              <Textarea
+                id="offerDescription"
+                value={offerForm.description}
+                onChange={(e) => setOfferForm({ ...offerForm, description: e.target.value })}
+                placeholder="Describe this offer..."
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Discount Type *</Label>
+                <Select
+                  value={offerForm.discountType}
+                  onValueChange={(val) => setOfferForm({ ...offerForm, discountType: val as "percentage" | "fixed_amount" | "bogo" })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percentage">Percentage (%)</SelectItem>
+                    <SelectItem value="fixed_amount">Fixed Amount ($)</SelectItem>
+                    <SelectItem value="bogo">Buy One Get One</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="discountValue">
+                  {offerForm.discountType === "percentage" ? "Discount (%)" : offerForm.discountType === "fixed_amount" ? "Amount ($)" : "Value"} *
+                </Label>
+                <Input
+                  id="discountValue"
+                  value={offerForm.discountValue}
+                  onChange={(e) => setOfferForm({ ...offerForm, discountValue: e.target.value })}
+                  placeholder={offerForm.discountType === "percentage" ? "20" : "5.00"}
+                  type="number"
+                  step="0.01"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Apply to Menu Item (optional)</Label>
+              <Select
+                value={offerForm.menuItemId}
+                onValueChange={(val) => setOfferForm({ ...offerForm, menuItemId: val === "none" ? "" : val })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All items (general offer)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">All Items (General Offer)</SelectItem>
+                  {menuItems.map((item) => (
+                    <SelectItem key={item.id} value={item.id.toString()}>
+                      {item.name} — ${parseFloat(item.price).toFixed(2)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="startDate">Start Date</Label>
+                <Input
+                  id="startDate"
+                  type="date"
+                  value={offerForm.startDate}
+                  onChange={(e) => setOfferForm({ ...offerForm, startDate: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="endDate">End Date</Label>
+                <Input
+                  id="endDate"
+                  type="date"
+                  value={offerForm.endDate}
+                  onChange={(e) => setOfferForm({ ...offerForm, endDate: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="offerActive"
+                checked={offerForm.isActive}
+                onCheckedChange={(checked) => setOfferForm({ ...offerForm, isActive: checked })}
+              />
+              <Label htmlFor="offerActive">Active</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsOfferDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleOfferSubmit}
+              disabled={createOfferMutation.isPending || updateOfferMutation.isPending}
+            >
+              {(createOfferMutation.isPending || updateOfferMutation.isPending) && (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              )}
+              {editingOffer ? "Update" : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>

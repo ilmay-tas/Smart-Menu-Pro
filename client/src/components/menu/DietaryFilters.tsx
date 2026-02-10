@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Leaf, WheatOff, Flame, UtensilsCrossed } from "lucide-react";
 
-export type DietaryFilter = "all" | "vegan" | "glutenFree" | "spicy";
+export type DietaryFilter = "all" | "vegan" | "vegetarian" | "glutenFree" | "spicy";
 
 interface DietaryFiltersProps {
   activeFilter: DietaryFilter;
@@ -11,6 +11,7 @@ interface DietaryFiltersProps {
 const filters: { id: DietaryFilter; label: string; icon: typeof Leaf }[] = [
   { id: "all", label: "All", icon: UtensilsCrossed },
   { id: "vegan", label: "Vegan", icon: Leaf },
+  { id: "vegetarian", label: "Vegetarian", icon: Leaf },
   { id: "glutenFree", label: "Gluten-Free", icon: WheatOff },
   { id: "spicy", label: "Spicy", icon: Flame },
 ];

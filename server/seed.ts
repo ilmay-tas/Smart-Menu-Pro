@@ -265,16 +265,7 @@ const menuData = [
 export async function seedDatabase() {
   console.log("Seeding database...");
 
-  const categoryMap: Record<string, number> = {};
-  const existingCategories = await db.select().from(categories);
-  for (const cat of existingCategories) {
-    categoryMap[cat.name] = cat.id;
-  }
-  for (const cat of categoryData) {
-    if (categoryMap[cat.name]) continue;
-    const [created] = await db.insert(categories).values(cat).returning();
-    categoryMap[cat.name] = created.id;
-  }
+  // Categories are no longer seeded — owners manage their own categories via the dashboard
 
   // Seed staff users (before restaurant & menu items so we have ownerId)
   const staffData = [
@@ -321,50 +312,7 @@ export async function seedDatabase() {
     restaurantId = created.id;
   }
 
-  // Seed menu items
-  const existingItems = await db.select({
-    id: menuItems.id,
-    name: menuItems.name,
-    imageUrl: menuItems.imageUrl,
-  }).from(menuItems);
-  const existingItemsByName = new Map(existingItems.map((item) => [item.name, item]));
-  for (const item of menuData) {
-    const existing = existingItemsByName.get(item.name);
-    if (existing) {
-      const needsUpdate = existing.imageUrl !== item.imageUrl
-        || existing.calories !== item.calories
-        || existing.proteinGrams !== item.proteinGrams
-        || existing.carbsGrams !== item.carbsGrams
-        || existing.fatGrams !== item.fatGrams;
-      if (needsUpdate) {
-        await db.update(menuItems)
-          .set({
-            imageUrl: item.imageUrl,
-            calories: item.calories,
-            proteinGrams: item.proteinGrams,
-            carbsGrams: item.carbsGrams,
-            fatGrams: item.fatGrams,
-          })
-          .where(eq(menuItems.id, existing.id));
-      }
-      continue;
-    }
-    const { modifiers: itemModifiers, category, ...menuItem } = item;
-    const [created] = await db.insert(menuItems).values({
-      ...menuItem,
-      categoryId: categoryMap[category],
-      restaurantId: restaurantId,
-    }).returning();
-    
-    // Add modifiers
-    for (const mod of itemModifiers) {
-      await db.insert(modifiers).values({
-        menuItemId: created.id,
-        name: mod.name,
-        additionalCost: mod.additionalCost,
-      });
-    }
-  }
+  // Menu items are no longer seeded — owners manage their own menus via the dashboard
 
   // Seed tables (1-12)
   const existingTables = await db.select().from(restaurantTables);
