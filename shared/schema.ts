@@ -203,7 +203,7 @@ export const orderTickets = pgTable("order_tickets", {
 export const orderItems = pgTable("order_items", {
   id: serial("id").primaryKey(),
   orderId: integer("order_id").notNull().references(() => orderTickets.id, { onDelete: "cascade" }),
-  menuItemId: integer("menu_item_id").notNull().references(() => menuItems.id),
+  menuItemId: integer("menu_item_id").notNull().references(() => menuItems.id, { onDelete: "cascade" }),
   quantity: integer("quantity").notNull(),
   note: text("note"),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
@@ -221,6 +221,23 @@ export const feedback = pgTable("feedback", {
   serviceRating: integer("service_rating").notNull(),
   tasteRating: integer("taste_rating").notNull(),
   comment: text("comment"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Special Offers
+export const discountTypeEnum = pgEnum("discount_type", ["percentage", "fixed_amount", "bogo"]);
+
+export const specialOffers = pgTable("special_offers", {
+  id: serial("id").primaryKey(),
+  restaurantId: integer("restaurant_id").notNull().references(() => restaurants.id, { onDelete: "cascade" }),
+  menuItemId: integer("menu_item_id").references(() => menuItems.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  discountType: discountTypeEnum("discount_type").notNull(),
+  discountValue: decimal("discount_value", { precision: 10, scale: 2 }).notNull(),
+  isActive: boolean("is_active").default(true),
+  startDate: timestamp("start_date"),
+  endDate: timestamp("end_date"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -250,6 +267,7 @@ export const insertRestaurantSchema = createInsertSchema(restaurants).omit({ id:
 export const insertCustomerPreferencesSchema = createInsertSchema(customerPreferences).omit({ id: true, updatedAt: true });
 export const insertStaffRestaurantAssignmentSchema = createInsertSchema(staffRestaurantAssignments).omit({ id: true, requestedAt: true, approvedAt: true, revokedAt: true });
 export const insertFeedbackSchema = createInsertSchema(feedback).omit({ id: true, createdAt: true });
+export const insertSpecialOfferSchema = createInsertSchema(specialOffers).omit({ id: true, createdAt: true });
 
 // Types
 export type InsertStaff = z.infer<typeof insertStaffSchema>;
@@ -279,6 +297,8 @@ export type StaffRestaurantAssignment = typeof staffRestaurantAssignments.$infer
 export type InsertStaffRestaurantAssignment = z.infer<typeof insertStaffRestaurantAssignmentSchema>;
 export type Feedback = typeof feedback.$inferSelect;
 export type InsertFeedback = z.infer<typeof insertFeedbackSchema>;
+export type SpecialOffer = typeof specialOffers.$inferSelect;
+export type InsertSpecialOffer = z.infer<typeof insertSpecialOfferSchema>;
 
 // API Request/Response Schemas
 export const staffSignUpSchema = z.object({

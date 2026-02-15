@@ -57,6 +57,7 @@ interface MenuItem {
   image: string;
   category: string;
   isVegan: boolean | null;
+  isVegetarian: boolean | null;
   isGlutenFree: boolean | null;
   isSpicy: boolean | null;
   allergens: string[] | null;
@@ -199,6 +200,20 @@ export default function CustomerMenu({
   });
   const suggestedItems = suggestedData?.items || [];
 
+  // Fetch active special offers
+  interface ActiveOffer {
+    id: number;
+    menuItemId: number | null;
+    title: string;
+    description: string | null;
+    discountType: "percentage" | "fixed_amount" | "bogo";
+    discountValue: string;
+    isActive: boolean | null;
+  }
+  const { data: activeOffers = [] } = useQuery<ActiveOffer[]>({
+    queryKey: ["/api/offers/active"],
+  });
+
   const updatePreferencesMutation = useMutation({
     mutationFn: async (data: CustomerPreferences) => {
       const res = await apiRequest("PUT", "/api/customer/preferences", data);
@@ -307,6 +322,7 @@ export default function CustomerMenu({
     return menuItems.filter((item) => {
       if (activeCategory !== "All" && item.category !== activeCategory) return false;
       if (activeFilter === "vegan" && !item.isVegan) return false;
+      if (activeFilter === "vegetarian" && !item.isVegetarian) return false;
       if (activeFilter === "glutenFree" && !item.isGlutenFree) return false;
       if (activeFilter === "spicy" && !item.isSpicy) return false;
       return true;
@@ -548,47 +564,124 @@ export default function CustomerMenu({
             <DietaryFilters activeFilter={activeFilter} onFilterChange={setActiveFilter} />
             <CategoryTabs categories={categories} activeCategory={activeCategory} onCategoryChange={setActiveCategory} />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredItems.map((item) => (
-                <Card
-                  key={item.id}
-                  className="overflow-hidden hover-elevate active-elevate-2 cursor-pointer"
-                  onClick={() => setSelectedItem(item)}
-                  data-testid={`card-menu-item-${item.id}`}
-                >
-                  <div className="aspect-square overflow-hidden">
-                    <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="p-4">
-                    <div className="flex items-start justify-between gap-2 flex-wrap">
-                      <h3 className="font-semibold text-base">{item.name}</h3>
-                      <span className="font-bold text-base">${parseFloat(item.price).toFixed(2)}</span>
+            {(() => {
+              // Group items by category for the menu display
+              const groupedByCategory: Record<string, typeof filteredItems> = {};
+              filteredItems.forEach((item) => {
+                const cat = item.category || "Other";
+                if (!groupedByCategory[cat]) groupedByCategory[cat] = [];
+                groupedByCategory[cat].push(item);
+              });
+              const categoryOrder = categories.filter((c) => c !== "All");
+
+              const renderMenuItem = (item: typeof filteredItems[0]) => {
+                const itemOffer = activeOffers.find((o) => o.menuItemId === parseInt(item.id));
+                const originalPrice = parseFloat(item.price);
+                let discountedPrice: number | null = null;
+                if (itemOffer) {
+                  if (itemOffer.discountType === "percentage") {
+                    discountedPrice = originalPrice * (1 - parseFloat(itemOffer.discountValue) / 100);
+                  } else if (itemOffer.discountType === "fixed_amount") {
+                    discountedPrice = Math.max(0, originalPrice - parseFloat(itemOffer.discountValue));
+                  }
+                }
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-start gap-3 py-3 cursor-pointer hover:bg-muted/50 rounded-lg px-2 transition-colors"
+                    onClick={() => setSelectedItem(item)}
+                    data-testid={`card-menu-item-${item.id}`}
+                  >
+                    {/* Image */}
+                    <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0 bg-muted">
+                      <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
                     </div>
-                    <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{item.description}</p>
-                    {item.calories && (
-                      <p className="text-xs text-muted-foreground mt-1">{item.calories} cal</p>
-                    )}
-                    <div className="flex gap-1 mt-2 flex-wrap">
-                      {item.isVegan && (
-                        <Badge variant="secondary" className="text-xs">
-                          <Leaf className="w-3 h-3 mr-1" /> Vegan
-                        </Badge>
-                      )}
-                      {item.isGlutenFree && (
-                        <Badge variant="secondary" className="text-xs">
-                          <WheatOff className="w-3 h-3 mr-1" /> GF
-                        </Badge>
-                      )}
-                      {item.isSpicy && (
-                        <Badge variant="secondary" className="text-xs">
-                          <Flame className="w-3 h-3 mr-1" /> Spicy
-                        </Badge>
-                      )}
+
+                    {/* Name + Description */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-1">
+                        <h3 className="font-bold text-sm uppercase tracking-wide text-foreground truncate">
+                          {item.name}
+                        </h3>
+                        {itemOffer && (
+                          <Badge className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0 shrink-0">
+                            {itemOffer.discountType === "percentage" && `${itemOffer.discountValue}%`}
+                            {itemOffer.discountType === "fixed_amount" && `$${parseFloat(itemOffer.discountValue).toFixed(0)}`}
+                            {itemOffer.discountType === "bogo" && "BOGO"}
+                          </Badge>
+                        )}
+                      </div>
+                      {/* Dotted line + Price */}
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <div className="flex-1 border-b border-dotted border-red-300 dark:border-red-700 translate-y-[-2px]" />
+                        <div className="shrink-0 font-bold text-base">
+                          {discountedPrice !== null ? (
+                            <span className="flex items-baseline gap-1">
+                              <span className="text-red-500">{discountedPrice.toFixed(0)}</span>
+                              <span className="text-xs text-muted-foreground line-through">{originalPrice.toFixed(0)}</span>
+                            </span>
+                          ) : (
+                            <span>{originalPrice.toFixed(0)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
+                        {item.description}
+                      </p>
+                      <div className="flex gap-1 mt-1 flex-wrap">
+                        {item.isVegan && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            <Leaf className="w-2.5 h-2.5 mr-0.5" /> Vegan
+                          </Badge>
+                        )}
+                        {item.isVegetarian && !item.isVegan && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            <Leaf className="w-2.5 h-2.5 mr-0.5" /> Vegetarian
+                          </Badge>
+                        )}
+                        {item.isGlutenFree && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            <WheatOff className="w-2.5 h-2.5 mr-0.5" /> GF
+                          </Badge>
+                        )}
+                        {item.isSpicy && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            <Flame className="w-2.5 h-2.5 mr-0.5" /> Spicy
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </Card>
-              ))}
-            </div>
+                );
+              };
+
+              return (
+                <div className="space-y-6">
+                  {activeCategory === "All" ? (
+                    // Grouped view: items organized under category headers
+                    categoryOrder.map((catName) => {
+                      const items = groupedByCategory[catName];
+                      if (!items || items.length === 0) return null;
+                      return (
+                        <div key={catName}>
+                          <h2 className="text-xl font-extrabold uppercase tracking-wider text-red-600 dark:text-red-400 border-b-2 border-red-600 dark:border-red-400 pb-1 mb-2">
+                            {catName}
+                          </h2>
+                          <div className="divide-y divide-muted">
+                            {items.map(renderMenuItem)}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    // Single category: just list items
+                    <div className="divide-y divide-muted">
+                      {filteredItems.map(renderMenuItem)}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {filteredItems.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
