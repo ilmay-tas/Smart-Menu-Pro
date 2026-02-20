@@ -13,6 +13,13 @@ npm install
 ```
 
 Create a database and set `DATABASE_URL`.
+You can also put it in a `.env` file (see `.env.example`).
+
+Using `.env`:
+```bash
+cp .env.example .env
+# edit .env and set DATABASE_URL
+```
 
 ### Option A: Docker (no local Postgres needed)
 ```bash
@@ -26,6 +33,14 @@ export DATABASE_URL="postgres://postgres:pass@localhost:5432/mydine"
 createdb mydine
 export DATABASE_URL="postgres://<your_user>@localhost:5432/mydine"
 ```
+
+### Option C: Supabase (shared remote DB)
+```bash
+export DATABASE_URL="postgresql://postgres.<PROJECT_REF>:YOUR_PASSWORD@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres?sslmode=no-verify"
+```
+Notes:
+- Replace `<PROJECT_REF>` and `YOUR_PASSWORD`.
+- `sslmode=no-verify` is fine for dev; use a proper CA in production.
 
 Push schema and start dev server:
 ```bash

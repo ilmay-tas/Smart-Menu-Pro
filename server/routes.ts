@@ -127,8 +127,9 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       // Non-owner staff must have an approved restaurant assignment
+      let approvedAssignment = null;
       if (staffMember.role !== "owner") {
-        const approvedAssignment = await storage.getApprovedAssignmentForStaff(staffMember.id);
+        approvedAssignment = await storage.getApprovedAssignmentForStaff(staffMember.id);
         if (!approvedAssignment) {
           return res.status(403).json({ 
             error: "Your account is pending approval from the restaurant owner. Please wait for approval before signing in.",
@@ -140,6 +141,13 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       req.session.staffId = staffMember.id;
       req.session.staffRole = staffMember.role;
       req.session.userType = "staff";
+      req.session.restaurantId = restaurant.id;
+      if (staffMember.role === "owner") {
+        const ownedRestaurant = await storage.getRestaurantByOwnerId(staffMember.id);
+        if (ownedRestaurant) req.session.restaurantId = ownedRestaurant.id;
+      } else if (approvedAssignment) {
+        req.session.restaurantId = approvedAssignment.restaurantId;
+      }
 
       res.json({ user: { id: staffMember.id, name: staffMember.name, username: staffMember.username, role: staffMember.role, type: "staff" } });
     } catch (error: any) {
@@ -231,6 +239,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         const allRestaurants = await storage.getRestaurants();
         const active = allRestaurants.find((r) => r.isActive);
         if (active) restaurantId = active.id;
+      }
+
+      if (restaurantId) {
+        req.session.restaurantId = restaurantId;
       }
 
       const items = restaurantId
@@ -334,7 +346,16 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // ============ SPECIAL OFFERS ============
   app.get("/api/offers/active", async (req, res) => {
     try {
-      const offers = await storage.getAllActiveOffers();
+      let restaurantId: number | null = null;
+      if (req.query.restaurantId) {
+        restaurantId = parseInt(req.query.restaurantId as string);
+      } else if (req.session.restaurantId) {
+        restaurantId = req.session.restaurantId;
+      }
+
+      const offers = restaurantId
+        ? await storage.getActiveOffersByRestaurant(restaurantId)
+        : await storage.getAllActiveOffers();
       res.json(offers);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -423,16 +444,19 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   app.get("/api/orders", async (req, res) => {
     try {
       const { status } = req.query;
+      const restaurantId = req.query.restaurantId
+        ? parseInt(req.query.restaurantId as string)
+        : req.session.restaurantId;
       let orders;
       
       if (status && status !== "all") {
-        orders = await storage.getOrdersByStatus(status as string);
+        orders = await storage.getOrdersByStatus(status as string, restaurantId);
       } else {
-        orders = await storage.getOrders();
+        orders = await storage.getOrders(restaurantId);
       }
 
       // Transform orders to include item names and table numbers
-      const tables = await storage.getTables();
+      const tables = await storage.getTables(restaurantId);
       const tableMap = Object.fromEntries(tables.map((t) => [t.id, t.tableNumber]));
       
       const transformedOrders = await Promise.all(
@@ -484,14 +508,22 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     try {
       const data = createOrderSchema.parse(req.body);
       
+      const restaurantId = req.query.restaurantId
+        ? parseInt(req.query.restaurantId as string)
+        : req.session.restaurantId;
+      if (!restaurantId) {
+        return res.status(400).json({ error: "Restaurant context is required to place an order" });
+      }
+
       const totalAmount = data.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-      const totalOrders = await storage.getTotalOrders();
+      const totalOrders = await storage.getTotalOrders(restaurantId);
       const orderNumber = String(totalOrders + 1).padStart(3, "0");
 
-      const table = await storage.getTableByNumber(data.tableNumber);
+      const table = await storage.getTableByNumber(data.tableNumber, restaurantId);
       
       const order = await storage.createOrder({
         orderNumber,
+        restaurantId,
         tableId: table?.id || null,
         customerId: req.session.customerId || null,
         totalAmount: totalAmount.toFixed(2),
@@ -561,7 +593,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const orders = await storage.getOrdersByCustomer(req.session.customerId);
-      const tables = await storage.getTables();
+      const tables = await storage.getTables(req.session.restaurantId);
       const tableMap = Object.fromEntries(tables.map((t) => [t.id, t.tableNumber]));
       
       const transformedOrders = await Promise.all(
@@ -600,8 +632,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // ============ TABLE CALLS ============
   app.get("/api/table-calls", async (req, res) => {
     try {
-      const calls = await storage.getActiveCalls();
-      const tables = await storage.getTables();
+      const restaurantId = req.query.restaurantId
+        ? parseInt(req.query.restaurantId as string)
+        : req.session.restaurantId;
+      const calls = await storage.getActiveCalls(restaurantId);
+      const tables = await storage.getTables(restaurantId);
       const tableMap = Object.fromEntries(tables.map((t) => [t.id, t.tableNumber]));
       
       const transformedCalls = calls.map((call) => ({
@@ -625,7 +660,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const data = createTableCallSchema.parse(req.body);
-      const table = await storage.getTableByNumber(data.tableNumber);
+      const restaurantId = req.session.restaurantId;
+      if (!restaurantId) {
+        return res.status(400).json({ error: "Restaurant context is required to call a waiter" });
+      }
+      const table = await storage.getTableByNumber(data.tableNumber, restaurantId);
       
       if (!table) {
         return res.status(404).json({ error: "Table not found" });
@@ -696,7 +735,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // ============ TABLES ============
   app.get("/api/tables", async (req, res) => {
     try {
-      const tables = await storage.getTables();
+      const restaurantId = req.query.restaurantId
+        ? parseInt(req.query.restaurantId as string)
+        : req.session.restaurantId;
+      const tables = await storage.getTables(restaurantId);
       res.json(tables);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -706,13 +748,16 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // ============ ANALYTICS ============
   app.get("/api/analytics/summary", async (req, res) => {
     try {
+      const restaurantId = req.query.restaurantId
+        ? parseInt(req.query.restaurantId as string)
+        : req.session.restaurantId;
       const [totalRevenue, totalOrders, tables] = await Promise.all([
-        storage.getTotalRevenue(),
-        storage.getTotalOrders(),
-        storage.getTables(),
+        storage.getTotalRevenue(restaurantId),
+        storage.getTotalOrders(restaurantId),
+        storage.getTables(restaurantId),
       ]);
 
-      const orders = await storage.getOrders();
+      const orders = await storage.getOrders(restaurantId);
       const activeOrders = orders.filter((o) => o.status !== "delivered").length;
       const occupiedTables = tables.filter((t) => t.isOccupied).length;
       const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
@@ -733,7 +778,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   app.get("/api/analytics/top-selling", async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 5;
-      const data = await storage.getTopSellingItems(limit);
+      const restaurantId = req.query.restaurantId
+        ? parseInt(req.query.restaurantId as string)
+        : req.session.restaurantId;
+      const data = await storage.getTopSellingItems(limit, restaurantId);
       res.json(data);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -743,7 +791,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   app.get("/api/analytics/daily-revenue", async (req, res) => {
     try {
       const days = parseInt(req.query.days as string) || 7;
-      const data = await storage.getDailyRevenue(days);
+      const restaurantId = req.query.restaurantId
+        ? parseInt(req.query.restaurantId as string)
+        : req.session.restaurantId;
+      const data = await storage.getDailyRevenue(days, restaurantId);
       res.json(data);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1148,8 +1199,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(401).json({ error: "Customer authentication required" });
       }
 
-      const suggestions = await storage.getSuggestedItems(req.session.customerId, 6);
-      const cats = await storage.getCategories();
+      const restaurantId = req.session.restaurantId;
+      const suggestions = await storage.getSuggestedItems(req.session.customerId, 6, restaurantId);
+      const cats = restaurantId
+        ? await storage.getCategoriesByRestaurant(restaurantId)
+        : await storage.getCategories();
       const categoryMap = Object.fromEntries(cats.map((c) => [c.id, c.name]));
 
       const transformedItems = await Promise.all(suggestions.map(async (item) => {
@@ -1187,7 +1241,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const orders = await storage.getOrdersWithNutrition(req.session.customerId);
-      const tables = await storage.getTables();
+      const tables = await storage.getTables(req.session.restaurantId);
       const tableMap = Object.fromEntries(tables.map((t) => [t.id, t.tableNumber]));
       
       // Get today's date at midnight for comparison
@@ -1306,6 +1360,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         const allRestaurants = await storage.getRestaurants();
         const active = allRestaurants.find((r) => r.isActive);
         if (active) restaurantId = active.id;
+      }
+
+      if (restaurantId) {
+        req.session.restaurantId = restaurantId;
       }
 
       const rawItems = restaurantId

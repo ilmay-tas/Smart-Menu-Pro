@@ -58,7 +58,8 @@ export const ingredients = pgTable("ingredients", {
 
 export const restaurantTables = pgTable("restaurant_tables", {
   id: serial("id").primaryKey(),
-  tableNumber: integer("table_number").notNull().unique(),
+  restaurantId: integer("restaurant_id").notNull().references(() => restaurants.id, { onDelete: "cascade" }),
+  tableNumber: integer("table_number").notNull(),
   qrCodeString: varchar("qr_code_string", { length: 255 }).unique(),
   isOccupied: boolean("is_occupied").default(false),
 });
@@ -191,6 +192,7 @@ export const menuDietaryTags = pgTable("menu_dietary_tags", {
 export const orderTickets = pgTable("order_tickets", {
   id: serial("id").primaryKey(),
   orderNumber: varchar("order_number", { length: 20 }).notNull(),
+  restaurantId: integer("restaurant_id").notNull().references(() => restaurants.id, { onDelete: "cascade" }),
   tableId: integer("table_id").references(() => restaurantTables.id),
   customerId: integer("customer_id").references(() => customers.id),
   status: orderStatusEnum("status").notNull().default("new"),

@@ -71,15 +71,15 @@ export interface IStorage {
   deleteCategory(id: number): Promise<boolean>;
 
   // Tables
-  getTables(): Promise<RestaurantTable[]>;
-  getTableByNumber(tableNumber: number): Promise<RestaurantTable | undefined>;
-  createTable(tableNumber: number): Promise<RestaurantTable>;
+  getTables(restaurantId?: number): Promise<RestaurantTable[]>;
+  getTableByNumber(tableNumber: number, restaurantId?: number): Promise<RestaurantTable | undefined>;
+  createTable(tableNumber: number, restaurantId: number): Promise<RestaurantTable>;
 
   // Orders
-  getOrders(): Promise<(OrderTicket & { items: OrderItem[] })[]>;
+  getOrders(restaurantId?: number): Promise<(OrderTicket & { items: OrderItem[] })[]>;
   getOrder(id: number): Promise<(OrderTicket & { items: OrderItem[] }) | undefined>;
-  getOrdersByStatus(status: string): Promise<(OrderTicket & { items: OrderItem[] })[]>;
-  createOrder(data: { orderNumber: string; tableId: number | null; customerId: number | null; totalAmount: string }): Promise<OrderTicket>;
+  getOrdersByStatus(status: string, restaurantId?: number): Promise<(OrderTicket & { items: OrderItem[] })[]>;
+  createOrder(data: { orderNumber: string; restaurantId: number; tableId: number | null; customerId: number | null; totalAmount: string }): Promise<OrderTicket>;
   updateOrderStatus(id: number, status: string): Promise<OrderTicket | undefined>;
 
   // Order Items
@@ -90,8 +90,8 @@ export interface IStorage {
   updatePaymentStatus(orderId: number, paymentStatus: string): Promise<OrderTicket | undefined>;
 
   // Table Calls
-  getActiveCalls(): Promise<TableCall[]>;
-  getCallsByTable(tableId: number): Promise<TableCall[]>;
+  getActiveCalls(restaurantId?: number): Promise<TableCall[]>;
+  getCallsByTable(tableId: number, restaurantId?: number): Promise<TableCall[]>;
   resolveAcknowledgedCallsByTable(tableId: number): Promise<number>;
   createTableCall(data: InsertTableCall): Promise<TableCall>;
   acknowledgeCall(callId: number, staffId: number): Promise<TableCall | undefined>;
@@ -101,10 +101,10 @@ export interface IStorage {
   getOrdersByCustomer(customerId: number): Promise<(OrderTicket & { items: OrderItem[] })[]>;
 
   // Analytics
-  getTotalRevenue(): Promise<number>;
-  getTotalOrders(): Promise<number>;
-  getTopSellingItems(limit: number): Promise<{ name: string; orders: number; revenue: number }[]>;
-  getDailyRevenue(days: number): Promise<{ date: string; revenue: number; orders: number }[]>;
+  getTotalRevenue(restaurantId?: number): Promise<number>;
+  getTotalOrders(restaurantId?: number): Promise<number>;
+  getTopSellingItems(limit: number, restaurantId?: number): Promise<{ name: string; orders: number; revenue: number }[]>;
+  getDailyRevenue(days: number, restaurantId?: number): Promise<{ date: string; revenue: number; orders: number }[]>;
 
   // Restaurants
   getRestaurants(): Promise<Restaurant[]>;
@@ -129,8 +129,8 @@ export interface IStorage {
   getOrdersWithNutrition(customerId: number): Promise<(OrderTicket & { items: (OrderItem & { menuItem: MenuItem })[] })[]>;
 
   // Suggested items based on order history
-  getSuggestedItems(customerId: number, limit?: number): Promise<MenuItem[]>;
-  getPopularItems(limit?: number): Promise<MenuItem[]>;
+  getSuggestedItems(customerId: number, limit?: number, restaurantId?: number): Promise<MenuItem[]>;
+  getPopularItems(limit?: number, restaurantId?: number): Promise<MenuItem[]>;
 
   // Feedback
   createFeedback(data: InsertFeedback): Promise<Feedback>;
@@ -249,23 +249,34 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Tables
-  async getTables(): Promise<RestaurantTable[]> {
+  async getTables(restaurantId?: number): Promise<RestaurantTable[]> {
+    if (restaurantId) {
+      return db.select().from(restaurantTables).where(eq(restaurantTables.restaurantId, restaurantId));
+    }
     return db.select().from(restaurantTables);
   }
 
-  async getTableByNumber(tableNumber: number): Promise<RestaurantTable | undefined> {
-    const [table] = await db.select().from(restaurantTables).where(eq(restaurantTables.tableNumber, tableNumber));
+  async getTableByNumber(tableNumber: number, restaurantId?: number): Promise<RestaurantTable | undefined> {
+    const whereClause = restaurantId
+      ? and(eq(restaurantTables.tableNumber, tableNumber), eq(restaurantTables.restaurantId, restaurantId))
+      : eq(restaurantTables.tableNumber, tableNumber);
+    const [table] = await db.select().from(restaurantTables).where(whereClause);
     return table;
   }
 
-  async createTable(tableNumber: number): Promise<RestaurantTable> {
-    const [created] = await db.insert(restaurantTables).values({ tableNumber }).returning();
+  async createTable(tableNumber: number, restaurantId: number): Promise<RestaurantTable> {
+    const [created] = await db.insert(restaurantTables).values({ tableNumber, restaurantId }).returning();
     return created;
   }
 
   // Orders
-  async getOrders(): Promise<(OrderTicket & { items: OrderItem[] })[]> {
-    const orders = await db.select().from(orderTickets).orderBy(desc(orderTickets.createdAt));
+  async getOrders(restaurantId?: number): Promise<(OrderTicket & { items: OrderItem[] })[]> {
+    const orders = restaurantId
+      ? await db.select().from(orderTickets)
+          .where(eq(orderTickets.restaurantId, restaurantId))
+          .orderBy(desc(orderTickets.createdAt))
+      : await db.select().from(orderTickets)
+          .orderBy(desc(orderTickets.createdAt));
     return Promise.all(orders.map(async (order) => {
       const items = await this.getOrderItems(order.id);
       return { ...order, items };
@@ -279,9 +290,13 @@ export class DatabaseStorage implements IStorage {
     return { ...order, items };
   }
 
-  async getOrdersByStatus(status: string): Promise<(OrderTicket & { items: OrderItem[] })[]> {
+  async getOrdersByStatus(status: string, restaurantId?: number): Promise<(OrderTicket & { items: OrderItem[] })[]> {
+    const statusClause = eq(orderTickets.status, status as any);
+    const whereClause = restaurantId
+      ? and(statusClause, eq(orderTickets.restaurantId, restaurantId))
+      : statusClause;
     const orders = await db.select().from(orderTickets)
-      .where(eq(orderTickets.status, status as any))
+      .where(whereClause)
       .orderBy(desc(orderTickets.createdAt));
     return Promise.all(orders.map(async (order) => {
       const items = await this.getOrderItems(order.id);
@@ -289,7 +304,7 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async createOrder(data: { orderNumber: string; tableId: number | null; customerId: number | null; totalAmount: string }): Promise<OrderTicket> {
+  async createOrder(data: { orderNumber: string; restaurantId: number; tableId: number | null; customerId: number | null; totalAmount: string }): Promise<OrderTicket> {
     const [created] = await db.insert(orderTickets).values(data).returning();
     return created;
   }
@@ -323,13 +338,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Table Calls
-  async getActiveCalls(): Promise<TableCall[]> {
+  async getActiveCalls(restaurantId?: number): Promise<TableCall[]> {
+    if (!restaurantId) {
+      return db.select().from(tableCalls)
+        .where(ne(tableCalls.status, "resolved"))
+        .orderBy(desc(tableCalls.createdAt));
+    }
+    const tables = await db.select({ id: restaurantTables.id }).from(restaurantTables)
+      .where(eq(restaurantTables.restaurantId, restaurantId));
+    const tableIds = tables.map((t) => t.id);
+    if (tableIds.length === 0) return [];
     return db.select().from(tableCalls)
-      .where(ne(tableCalls.status, "resolved"))
+      .where(and(ne(tableCalls.status, "resolved"), sql`${tableCalls.tableId} = ANY(${tableIds})`))
       .orderBy(desc(tableCalls.createdAt));
   }
 
-  async getCallsByTable(tableId: number): Promise<TableCall[]> {
+  async getCallsByTable(tableId: number, restaurantId?: number): Promise<TableCall[]> {
+    if (restaurantId) {
+      const [table] = await db.select().from(restaurantTables)
+        .where(and(eq(restaurantTables.id, tableId), eq(restaurantTables.restaurantId, restaurantId)));
+      if (!table) return [];
+    }
     return db.select().from(tableCalls)
       .where(and(eq(tableCalls.tableId, tableId), ne(tableCalls.status, "resolved")));
   }
@@ -375,29 +404,48 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Analytics
-  async getTotalRevenue(): Promise<number> {
-    const result = await db.execute(sql`SELECT COALESCE(SUM(CAST(total_amount AS DECIMAL)), 0) as total FROM order_tickets`);
+  async getTotalRevenue(restaurantId?: number): Promise<number> {
+    const result = restaurantId
+      ? await db.execute(sql`SELECT COALESCE(SUM(CAST(total_amount AS DECIMAL)), 0) as total FROM order_tickets WHERE restaurant_id = ${restaurantId}`)
+      : await db.execute(sql`SELECT COALESCE(SUM(CAST(total_amount AS DECIMAL)), 0) as total FROM order_tickets`);
     return parseFloat((result.rows[0] as any)?.total || "0");
   }
 
-  async getTotalOrders(): Promise<number> {
-    const result = await db.execute(sql`SELECT COUNT(*) as count FROM order_tickets`);
+  async getTotalOrders(restaurantId?: number): Promise<number> {
+    const result = restaurantId
+      ? await db.execute(sql`SELECT COUNT(*) as count FROM order_tickets WHERE restaurant_id = ${restaurantId}`)
+      : await db.execute(sql`SELECT COUNT(*) as count FROM order_tickets`);
     return parseInt((result.rows[0] as any)?.count || "0");
   }
 
-  async getTopSellingItems(limit: number): Promise<{ name: string; orders: number; revenue: number }[]> {
-    const result = await db.execute(sql`
-      SELECT 
-        oi.menu_item_id,
-        mi.name,
-        CAST(SUM(oi.quantity) AS INTEGER) as orders,
-        CAST(SUM(CAST(oi.unit_price AS DECIMAL) * oi.quantity) AS DECIMAL) as revenue
-      FROM order_items oi
-      JOIN menu_items mi ON oi.menu_item_id = mi.id
-      GROUP BY oi.menu_item_id, mi.name
-      ORDER BY orders DESC
-      LIMIT ${limit}
-    `);
+  async getTopSellingItems(limit: number, restaurantId?: number): Promise<{ name: string; orders: number; revenue: number }[]> {
+    const result = restaurantId
+      ? await db.execute(sql`
+          SELECT 
+            oi.menu_item_id,
+            mi.name,
+            CAST(SUM(oi.quantity) AS INTEGER) as orders,
+            CAST(SUM(CAST(oi.unit_price AS DECIMAL) * oi.quantity) AS DECIMAL) as revenue
+          FROM order_items oi
+          JOIN order_tickets ot ON oi.order_id = ot.id
+          JOIN menu_items mi ON oi.menu_item_id = mi.id
+          WHERE ot.restaurant_id = ${restaurantId}
+          GROUP BY oi.menu_item_id, mi.name
+          ORDER BY orders DESC
+          LIMIT ${limit}
+        `)
+      : await db.execute(sql`
+          SELECT 
+            oi.menu_item_id,
+            mi.name,
+            CAST(SUM(oi.quantity) AS INTEGER) as orders,
+            CAST(SUM(CAST(oi.unit_price AS DECIMAL) * oi.quantity) AS DECIMAL) as revenue
+          FROM order_items oi
+          JOIN menu_items mi ON oi.menu_item_id = mi.id
+          GROUP BY oi.menu_item_id, mi.name
+          ORDER BY orders DESC
+          LIMIT ${limit}
+        `);
     return result.rows.map((row: any) => ({
       name: row.name,
       orders: parseInt(row.orders),
@@ -405,17 +453,29 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async getDailyRevenue(days: number): Promise<{ date: string; revenue: number; orders: number }[]> {
-    const result = await db.execute(sql`
-      SELECT 
-        TO_CHAR(created_at, 'Dy') as date,
-        COALESCE(SUM(CAST(total_amount AS DECIMAL)), 0) as revenue,
-        COUNT(*) as orders
-      FROM order_tickets
-      WHERE created_at >= NOW() - INTERVAL '${sql.raw(String(days))} days'
-      GROUP BY TO_CHAR(created_at, 'Dy'), DATE(created_at)
-      ORDER BY DATE(created_at)
-    `);
+  async getDailyRevenue(days: number, restaurantId?: number): Promise<{ date: string; revenue: number; orders: number }[]> {
+    const result = restaurantId
+      ? await db.execute(sql`
+          SELECT 
+            TO_CHAR(created_at, 'Dy') as date,
+            COALESCE(SUM(CAST(total_amount AS DECIMAL)), 0) as revenue,
+            COUNT(*) as orders
+          FROM order_tickets
+          WHERE restaurant_id = ${restaurantId}
+            AND created_at >= NOW() - INTERVAL '${sql.raw(String(days))} days'
+          GROUP BY TO_CHAR(created_at, 'Dy'), DATE(created_at)
+          ORDER BY DATE(created_at)
+        `)
+      : await db.execute(sql`
+          SELECT 
+            TO_CHAR(created_at, 'Dy') as date,
+            COALESCE(SUM(CAST(total_amount AS DECIMAL)), 0) as revenue,
+            COUNT(*) as orders
+          FROM order_tickets
+          WHERE created_at >= NOW() - INTERVAL '${sql.raw(String(days))} days'
+          GROUP BY TO_CHAR(created_at, 'Dy'), DATE(created_at)
+          ORDER BY DATE(created_at)
+        `);
     return result.rows.map((row: any) => ({
       date: row.date,
       revenue: parseFloat(row.revenue),
@@ -535,14 +595,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Get suggested items based on customer order history
-  async getSuggestedItems(customerId: number, limit: number = 6): Promise<MenuItem[]> {
+  async getSuggestedItems(customerId: number, limit: number = 6, restaurantId?: number): Promise<MenuItem[]> {
     // Get customer's order history to find frequently ordered categories
-    const customerOrders = await db.select().from(orderTickets)
-      .where(eq(orderTickets.customerId, customerId));
+    const orderWhere = restaurantId
+      ? and(eq(orderTickets.customerId, customerId), eq(orderTickets.restaurantId, restaurantId))
+      : eq(orderTickets.customerId, customerId);
+    const customerOrders = await db.select().from(orderTickets).where(orderWhere);
     
     if (customerOrders.length === 0) {
       // No order history, return popular items
-      return this.getPopularItems(limit);
+      return this.getPopularItems(limit, restaurantId);
     }
 
     const orderIds = customerOrders.map(o => o.id);
@@ -554,7 +616,7 @@ export class DatabaseStorage implements IStorage {
     const orderedMenuItemIds = orderedItems.map(oi => oi.menuItemId);
     
     if (orderedMenuItemIds.length === 0) {
-      return this.getPopularItems(limit);
+      return this.getPopularItems(limit, restaurantId);
     }
 
     // Get the categories of ordered items
@@ -572,14 +634,15 @@ export class DatabaseStorage implements IStorage {
         .where(and(
           sql`${menuItems.categoryId} = ANY(${categoryIds})`,
           sql`${menuItems.id} != ALL(${orderedMenuItemIds})`,
-          eq(menuItems.isSoldOut, false)
+          eq(menuItems.isSoldOut, false),
+          restaurantId ? eq(menuItems.restaurantId, restaurantId) : sql`TRUE`
         ))
         .limit(limit);
     }
     
     // If not enough suggestions, add popular items
     if (suggestions.length < limit) {
-      const popular = await this.getPopularItems(limit - suggestions.length);
+      const popular = await this.getPopularItems(limit - suggestions.length, restaurantId);
       const existingIds = new Set(suggestions.map(s => s.id));
       for (const item of popular) {
         if (!existingIds.has(item.id) && !orderedMenuItemIds.includes(item.id)) {
@@ -647,27 +710,45 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Get popular items based on order frequency
-  async getPopularItems(limit: number = 6): Promise<MenuItem[]> {
+  async getPopularItems(limit: number = 6, restaurantId?: number): Promise<MenuItem[]> {
     // Get most ordered items
-    const popularItemIds = await db.select({
-      menuItemId: orderItems.menuItemId,
-      orderCount: sql<number>`count(*)`.as("order_count")
-    })
-      .from(orderItems)
-      .groupBy(orderItems.menuItemId)
-      .orderBy(sql`count(*) DESC`)
-      .limit(limit);
+    const popularItemIds = restaurantId
+      ? await db.select({
+          menuItemId: orderItems.menuItemId,
+          orderCount: sql<number>`count(*)`.as("order_count")
+        })
+          .from(orderItems)
+          .innerJoin(orderTickets, eq(orderItems.orderId, orderTickets.id))
+          .where(eq(orderTickets.restaurantId, restaurantId))
+          .groupBy(orderItems.menuItemId)
+          .orderBy(sql`count(*) DESC`)
+          .limit(limit)
+      : await db.select({
+          menuItemId: orderItems.menuItemId,
+          orderCount: sql<number>`count(*)`.as("order_count")
+        })
+          .from(orderItems)
+          .groupBy(orderItems.menuItemId)
+          .orderBy(sql`count(*) DESC`)
+          .limit(limit);
     
     if (popularItemIds.length === 0) {
       // No orders yet, return some random available items
-      return db.select().from(menuItems)
-        .where(eq(menuItems.isSoldOut, false))
-        .limit(limit);
+      return restaurantId
+        ? db.select().from(menuItems)
+            .where(and(eq(menuItems.isSoldOut, false), eq(menuItems.restaurantId, restaurantId)))
+            .limit(limit)
+        : db.select().from(menuItems)
+            .where(eq(menuItems.isSoldOut, false))
+            .limit(limit);
     }
     
-    const ids = popularItemIds.map(p => p.menuItemId);
-    return db.select().from(menuItems)
-      .where(sql`${menuItems.id} = ANY(${ids})`);
+    const ids = popularItemIds.map((p: any) => p.menuItemId);
+    return restaurantId
+      ? db.select().from(menuItems)
+          .where(and(sql`${menuItems.id} = ANY(${ids})`, eq(menuItems.restaurantId, restaurantId)))
+      : db.select().from(menuItems)
+          .where(sql`${menuItems.id} = ANY(${ids})`);
   }
   // Special Offers
   async getOffersByRestaurant(restaurantId: number): Promise<SpecialOffer[]> {

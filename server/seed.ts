@@ -314,11 +314,11 @@ export async function seedDatabase() {
 
   // Menu items are no longer seeded — owners manage their own menus via the dashboard
 
-  // Seed tables (1-12)
+  // Seed tables (1-12) for the default restaurant
   const existingTables = await db.select().from(restaurantTables);
-  if (existingTables.length === 0) {
+  if (existingTables.length === 0 && restaurantId) {
     for (let i = 1; i <= 12; i++) {
-      await db.insert(restaurantTables).values({ tableNumber: i });
+      await db.insert(restaurantTables).values({ tableNumber: i, restaurantId });
     }
   }
 
