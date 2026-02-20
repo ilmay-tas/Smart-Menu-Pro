@@ -41,6 +41,8 @@ export DATABASE_URL="postgresql://postgres.<PROJECT_REF>:YOUR_PASSWORD@aws-1-ap-
 Notes:
 - Replace `<PROJECT_REF>` and `YOUR_PASSWORD`.
 - `sslmode=no-verify` is fine for dev; use a proper CA in production.
+Current Supabase Project Ref:
+`cufqqezpzvzkfpdmhcig`
 
 Push schema and start dev server:
 ```bash
