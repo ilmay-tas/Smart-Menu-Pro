@@ -141,7 +141,6 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       req.session.staffId = staffMember.id;
       req.session.staffRole = staffMember.role;
       req.session.userType = "staff";
-      req.session.restaurantId = restaurant.id;
       if (staffMember.role === "owner") {
         const ownedRestaurant = await storage.getRestaurantByOwnerId(staffMember.id);
         if (ownedRestaurant) req.session.restaurantId = ownedRestaurant.id;
