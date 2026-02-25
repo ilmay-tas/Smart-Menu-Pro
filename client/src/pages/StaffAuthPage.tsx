@@ -18,6 +18,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { Restaurant } from "@shared/schema";
 
+import { Link } from "wouter";
+
 type StaffRole = "waiter" | "kitchen" | "owner";
 
 interface StaffUser {
@@ -30,10 +32,9 @@ interface StaffUser {
 
 interface StaffAuthPageProps {
   onLogin: (user: StaffUser) => void;
-  onSwitchToCustomer: () => void;
 }
 
-export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuthPageProps) {
+export default function StaffAuthPage({ onLogin }: StaffAuthPageProps) {
   const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -41,17 +42,17 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
   const [role, setRole] = useState<StaffRole>("waiter");
   const [showPassword, setShowPassword] = useState(false);
   const [pendingApproval, setPendingApproval] = useState(false);
-  
+
   // Restaurant fields for owner signup
   const [restaurantName, setRestaurantName] = useState("");
   const [restaurantAddress, setRestaurantAddress] = useState("");
   const [restaurantPhone, setRestaurantPhone] = useState("");
   const [restaurantEmail, setRestaurantEmail] = useState("");
   const [restaurantDescription, setRestaurantDescription] = useState("");
-  
+
   // Restaurant selection for staff signup
   const [selectedRestaurantId, setSelectedRestaurantId] = useState<number | null>(null);
-  
+
   const { toast } = useToast();
 
   // Fetch restaurants for staff to join
@@ -71,10 +72,10 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
     },
     onError: (error: Error) => {
       if (error.message.includes("pending approval")) {
-        toast({ 
-          title: "Pending Approval", 
+        toast({
+          title: "Pending Approval",
           description: "Your account is waiting for owner approval. Please try again later.",
-          variant: "destructive" 
+          variant: "destructive"
         });
       } else {
         toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -122,9 +123,9 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
     },
     onSuccess: () => {
       setPendingApproval(true);
-      toast({ 
-        title: "Account created!", 
-        description: "Your account is pending owner approval. You'll be able to sign in once approved." 
+      toast({
+        title: "Account created!",
+        description: "Your account is pending owner approval. You'll be able to sign in once approved."
       });
     },
     onError: (error: Error) => {
@@ -182,7 +183,7 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
             </div>
             <h1 className="text-2xl font-bold mb-2">Account Created!</h1>
             <p className="text-muted-foreground mb-6">
-              Your account is pending approval from the restaurant owner. 
+              Your account is pending approval from the restaurant owner.
               You will be able to sign in once your account is approved.
             </p>
             <Button onClick={() => { setPendingApproval(false); setActiveTab("signin"); }} className="w-full">
@@ -333,8 +334,8 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
               {role !== "owner" && (
                 <div className="space-y-2">
                   <Label>Select Restaurant to Join</Label>
-                  <Select 
-                    value={selectedRestaurantId?.toString() || ""} 
+                  <Select
+                    value={selectedRestaurantId?.toString() || ""}
                     onValueChange={(v) => setSelectedRestaurantId(parseInt(v))}
                     disabled={isLoading}
                   >
@@ -446,19 +447,7 @@ export default function StaffAuthPage({ onLogin, onSwitchToCustomer }: StaffAuth
           </TabsContent>
         </Tabs>
 
-        <div className="mt-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            Are you a customer?{" "}
-            <Button
-              variant="ghost"
-              className="p-0 h-auto underline"
-              onClick={onSwitchToCustomer}
-              data-testid="link-customer-login"
-            >
-              Sign in here
-            </Button>
-          </p>
-        </div>
+
       </Card>
     </div>
   );

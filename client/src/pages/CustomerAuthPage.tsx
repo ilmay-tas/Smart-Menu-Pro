@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { motion, AnimatePresence } from "framer-motion";
+import { Link } from "wouter";
 import SaladBowl from "@/components/SaladBowl";
 
 interface CustomerUser {
@@ -17,10 +18,9 @@ interface CustomerUser {
 
 interface CustomerAuthPageProps {
   onLogin: (user: CustomerUser) => void;
-  onSwitchToStaff: () => void;
 }
 
-export default function CustomerAuthPage({ onLogin, onSwitchToStaff }: CustomerAuthPageProps) {
+export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [showNameField, setShowNameField] = useState(false);
@@ -284,11 +284,10 @@ export default function CustomerAuthPage({ onLogin, onSwitchToStaff }: CustomerA
                 >
                   <Button
                     onClick={handleContinue}
-                    className={`w-full h-14 text-lg rounded-xl font-semibold transition-all ${
-                      isPhoneComplete
-                        ? "bg-rose-500 hover:bg-rose-600 text-white shadow-lg shadow-rose-200"
-                        : "bg-muted text-muted-foreground cursor-not-allowed"
-                    }`}
+                    className={`w-full h-14 text-lg rounded-xl font-semibold transition-all ${isPhoneComplete
+                      ? "bg-rose-500 hover:bg-rose-600 text-white shadow-lg shadow-rose-200"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                      }`}
                     disabled={!isPhoneComplete || isLoading}
                     data-testid="button-customer-signin"
                   >
@@ -313,20 +312,7 @@ export default function CustomerAuthPage({ onLogin, onSwitchToStaff }: CustomerA
           </AnimatePresence>
         </div>
 
-        {/* Staff link */}
-        <div className="mt-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            Staff member?{" "}
-            <Button
-              variant="link"
-              className="p-0 h-auto text-rose-500 hover:text-rose-600"
-              onClick={onSwitchToStaff}
-              data-testid="link-staff-login"
-            >
-              Sign in here
-            </Button>
-          </p>
-        </div>
+
       </motion.div>
     </div>
   );

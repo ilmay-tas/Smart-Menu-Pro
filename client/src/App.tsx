@@ -11,6 +11,7 @@ import CustomerMenu from "@/pages/CustomerMenu";
 import KitchenDashboard from "@/pages/KitchenDashboard";
 import WaiterDashboard from "@/pages/WaiterDashboard";
 import OwnerDashboard from "@/pages/OwnerDashboard";
+import LandingPage from "@/pages/LandingPage";
 import NotFound from "@/pages/not-found";
 
 type StaffRole = "waiter" | "kitchen" | "owner";
@@ -35,7 +36,6 @@ type User = StaffUser | CustomerUser;
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [authMode, setAuthMode] = useState<"customer" | "staff">("customer");
   const [, navigate] = useLocation();
 
   useEffect(() => {
@@ -57,7 +57,16 @@ function AppContent() {
 
   const handleLogin = (loggedInUser: User) => {
     setUser(loggedInUser);
-    navigate("/");
+    if (loggedInUser.type === "customer") {
+      navigate("/");
+    } else {
+      // Redirect staff to their appropriate dashboard
+      switch ((loggedInUser as StaffUser).role) {
+        case "kitchen": navigate("/kitchen"); break;
+        case "waiter": navigate("/waiter"); break;
+        case "owner": navigate("/dashboard"); break;
+      }
+    }
   };
 
   const handleLogout = async () => {
@@ -79,37 +88,8 @@ function AppContent() {
     );
   }
 
-  if (!user) {
-    if (authMode === "staff") {
-      return (
-        <StaffAuthPage
-          onLogin={handleLogin}
-          onSwitchToCustomer={() => setAuthMode("customer")}
-        />
-      );
-    }
-    return (
-      <CustomerAuthPage
-        onLogin={handleLogin}
-        onSwitchToStaff={() => setAuthMode("staff")}
-      />
-    );
-  }
-
-  // Render based on user type
-  if (user.type === "customer") {
-    return (
-      <CustomerMenu
-        tableNumber="12"
-        userName={user.name}
-        onLogout={handleLogout}
-      />
-    );
-  }
-
-  // Staff user
-  const staffUser = user as StaffUser;
-  const renderStaffDashboard = () => {
+  // Define staff dashboard rendering helper
+  const renderStaffDashboard = (staffUser: StaffUser) => {
     switch (staffUser.role) {
       case "kitchen":
         return <KitchenDashboard userName={staffUser.name} onLogout={handleLogout} />;
@@ -124,14 +104,76 @@ function AppContent() {
 
   return (
     <Switch>
-      <Route path="/" component={() => renderStaffDashboard()} />
-      <Route path="/staff-login">{() => <Redirect to="/" />}</Route>
-      <Route path="/kitchen" component={() => <KitchenDashboard userName={staffUser.name} onLogout={handleLogout} />} />
-      <Route path="/waiter" component={() => <WaiterDashboard userName={staffUser.name} onLogout={handleLogout} />} />
-      <Route path="/dashboard" component={() => <OwnerDashboard userName={staffUser.name} onLogout={handleLogout} />} />
-      <Route path="/owner/orders" component={() => <OwnerDashboard userName={staffUser.name} onLogout={handleLogout} initialTab="analytics" />} />
-      <Route path="/owner/menu" component={() => <OwnerDashboard userName={staffUser.name} onLogout={handleLogout} initialTab="menu" />} />
-      <Route path="/owner/settings" component={() => <OwnerDashboard userName={staffUser.name} onLogout={handleLogout} initialTab="staff" />} />
+      {/* Login Routes */}
+      <Route path="/customer/login">
+        {user ? <Redirect to="/" /> : <CustomerAuthPage onLogin={handleLogin} />}
+      </Route>
+      <Route path="/staff/login">
+        {user ? <Redirect to="/" /> : <StaffAuthPage onLogin={handleLogin} />}
+      </Route>
+
+      {/* Main Landing / Protected Routes */}
+      <Route path="/">
+        {!user ? (
+          <LandingPage />
+        ) : user.type === "customer" ? (
+          <CustomerMenu tableNumber="12" userName={user.name} onLogout={handleLogout} />
+        ) : (
+          renderStaffDashboard(user as StaffUser)
+        )}
+      </Route>
+
+      {/* Staff Specific Routes */}
+      <Route path="/kitchen">
+        {!user || user.type !== "staff" || user.role !== "kitchen" ? (
+          <Redirect to="/staff/login" />
+        ) : (
+          <KitchenDashboard userName={user.name} onLogout={handleLogout} />
+        )}
+      </Route>
+
+      <Route path="/waiter">
+        {!user || user.type !== "staff" || user.role !== "waiter" ? (
+          <Redirect to="/staff/login" />
+        ) : (
+          <WaiterDashboard userName={user.name} onLogout={handleLogout} />
+        )}
+      </Route>
+
+      <Route path="/dashboard">
+        {!user || user.type !== "staff" || user.role !== "owner" ? (
+          <Redirect to="/staff/login" />
+        ) : (
+          <OwnerDashboard userName={user.name} onLogout={handleLogout} />
+        )}
+      </Route>
+
+      {/* Owner Detail Routes */}
+      <Route path="/owner/orders">
+        {!user || user.type !== "staff" || user.role !== "owner" ? (
+          <Redirect to="/staff/login" />
+        ) : (
+          <OwnerDashboard userName={user.name} onLogout={handleLogout} initialTab="analytics" />
+        )}
+      </Route>
+
+      <Route path="/owner/menu">
+        {!user || user.type !== "staff" || user.role !== "owner" ? (
+          <Redirect to="/staff/login" />
+        ) : (
+          <OwnerDashboard userName={user.name} onLogout={handleLogout} initialTab="menu" />
+        )}
+      </Route>
+
+      <Route path="/owner/settings">
+        {!user || user.type !== "staff" || user.role !== "owner" ? (
+          <Redirect to="/staff/login" />
+        ) : (
+          <OwnerDashboard userName={user.name} onLogout={handleLogout} initialTab="staff" />
+        )}
+      </Route>
+
+      {/* Fallback */}
       <Route component={NotFound} />
     </Switch>
   );
