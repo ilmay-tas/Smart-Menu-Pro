@@ -234,10 +234,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       } else if (req.session.restaurantId) {
         restaurantId = req.session.restaurantId;
       } else {
-        // Fallback: find the first active restaurant
-        const allRestaurants = await storage.getRestaurants();
-        const active = allRestaurants.find((r) => r.isActive);
-        if (active) restaurantId = active.id;
+        // Fallback: use a fixed default restaurant id
+        restaurantId = 2;
       }
 
       if (restaurantId) {
@@ -509,7 +507,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       
       const restaurantId = req.query.restaurantId
         ? parseInt(req.query.restaurantId as string)
-        : req.session.restaurantId;
+        : req.session.restaurantId ?? 2;
       if (!restaurantId) {
         return res.status(400).json({ error: "Restaurant context is required to place an order" });
       }
@@ -659,7 +657,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const data = createTableCallSchema.parse(req.body);
-      const restaurantId = req.session.restaurantId;
+      const restaurantId = req.session.restaurantId ?? 2;
       if (!restaurantId) {
         return res.status(400).json({ error: "Restaurant context is required to call a waiter" });
       }
@@ -1356,9 +1354,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       } else if (req.session.restaurantId) {
         restaurantId = req.session.restaurantId;
       } else {
-        const allRestaurants = await storage.getRestaurants();
-        const active = allRestaurants.find((r) => r.isActive);
-        if (active) restaurantId = active.id;
+        restaurantId = 2;
       }
 
       if (restaurantId) {
