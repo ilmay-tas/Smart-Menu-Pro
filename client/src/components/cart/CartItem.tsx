@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Plus, Minus, Trash2 } from "lucide-react";
+import { formatCurrencyTRY } from "@/lib/currency";
 
 export interface CartItemData {
   id: string;
@@ -50,7 +51,7 @@ export default function CartItem({
             )}
           </div>
           <span className="font-semibold text-sm flex-shrink-0" data-testid={`text-cart-item-total-${item.id}`}>
-            ${itemTotal.toFixed(2)}
+            {formatCurrencyTRY(itemTotal)}
           </span>
         </div>
         <div className="flex items-center justify-between mt-2">

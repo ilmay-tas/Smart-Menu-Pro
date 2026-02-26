@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient, apiRequest } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -13,6 +13,7 @@ import WaiterDashboard from "@/pages/WaiterDashboard";
 import OwnerDashboard from "@/pages/OwnerDashboard";
 import LandingPage from "@/pages/LandingPage";
 import NotFound from "@/pages/not-found";
+import { applyCustomerTheme, clearCustomerTheme, type CustomerThemeSettings } from "@/lib/customerTheme";
 
 type StaffRole = "waiter" | "kitchen" | "owner";
 
@@ -36,7 +37,7 @@ type User = StaffUser | CustomerUser;
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
 
   useEffect(() => {
     async function checkAuth() {
@@ -79,6 +80,30 @@ function AppContent() {
     queryClient.clear();
     navigate("/");
   };
+
+  const isCustomerExperience = location.startsWith("/customer") || user?.type === "customer";
+
+  const { data: customerTheme } = useQuery<CustomerThemeSettings | null>({
+    queryKey: ["/api/theme/current", location, user?.type ?? "guest"],
+    enabled: isCustomerExperience,
+    queryFn: async () => {
+      const restaurantId = new URLSearchParams(window.location.search).get("restaurantId");
+      const url = restaurantId ? `/api/theme/current?restaurantId=${encodeURIComponent(restaurantId)}` : "/api/theme/current";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        return null;
+      }
+      return res.json();
+    },
+  });
+
+  useEffect(() => {
+    if (isCustomerExperience) {
+      applyCustomerTheme(customerTheme);
+      return;
+    }
+    clearCustomerTheme();
+  }, [isCustomerExperience, customerTheme]);
 
   if (isLoading) {
     return (

@@ -8,6 +8,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
+import { formatCurrencyTRY } from "@/lib/currency";
 
 interface SalesDataPoint {
   date: string;
@@ -41,9 +42,12 @@ export default function SalesChart({
               axisLine={false}
               tickLine={false}
               tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-              tickFormatter={(value) => `$${value}`}
+              tickFormatter={(value) =>
+                formatCurrencyTRY(value, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+              }
             />
             <Tooltip
+              formatter={(value) => formatCurrencyTRY(Number(value))}
               contentStyle={{
                 backgroundColor: "hsl(var(--card))",
                 border: "1px solid hsl(var(--border))",

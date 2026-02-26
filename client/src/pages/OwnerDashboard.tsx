@@ -28,8 +28,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare, X, Check, Tag, Upload, ImagePlus } from "lucide-react";
+import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare, X, Check, Tag, Upload, ImagePlus, Palette } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { formatCurrencyTRY } from "@/lib/currency";
 import { useToast } from "@/hooks/use-toast";
 
 interface AnalyticsSummary {
@@ -101,8 +102,30 @@ interface Restaurant {
   email: string | null;
   description: string | null;
   logoUrl: string | null;
+  menuThemePrimary: string | null;
+  menuThemeAccent: string | null;
+  menuThemeBackground: string | null;
+  menuThemeForeground: string | null;
+  menuThemeCard: string | null;
   ownerId: number | null;
   isActive: boolean | null;
+}
+
+interface RestaurantTheme {
+  restaurantId: number;
+  menuThemePrimary: string | null;
+  menuThemeAccent: string | null;
+  menuThemeBackground: string | null;
+  menuThemeForeground: string | null;
+  menuThemeCard: string | null;
+}
+
+interface ThemeFormState {
+  menuThemePrimary: string;
+  menuThemeAccent: string;
+  menuThemeBackground: string;
+  menuThemeForeground: string;
+  menuThemeCard: string;
 }
 
 interface SpecialOffer {
@@ -145,6 +168,24 @@ interface OwnerDashboardProps {
   initialTab?: "analytics" | "staff" | "menu" | "feedback";
 }
 
+const DEFAULT_THEME = {
+  primary: "#ec407a",
+  accent: "#ffffff",
+  background: "#f0f0f0",
+  foreground: "#1a1a1a",
+  card: "#fcfcfc",
+};
+
+function mapThemeToForm(theme: Partial<RestaurantTheme> | Partial<Restaurant>): ThemeFormState {
+  return {
+    menuThemePrimary: theme.menuThemePrimary || DEFAULT_THEME.primary,
+    menuThemeAccent: theme.menuThemeAccent || DEFAULT_THEME.accent,
+    menuThemeBackground: theme.menuThemeBackground || DEFAULT_THEME.background,
+    menuThemeForeground: theme.menuThemeForeground || DEFAULT_THEME.foreground,
+    menuThemeCard: theme.menuThemeCard || DEFAULT_THEME.card,
+  };
+}
+
 export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout, initialTab = "analytics" }: OwnerDashboardProps) {
   const [activeTab, setActiveTab] = useState<"analytics" | "staff" | "menu" | "feedback">(initialTab);
   const [isMenuDialogOpen, setIsMenuDialogOpen] = useState(false);
@@ -156,6 +197,9 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     price: "",
     imageUrl: "",
     calories: "",
+    proteinGrams: "",
+    carbsGrams: "",
+    fatGrams: "",
     categoryId: "" as string,
     isVegan: false,
     isVegetarian: false,
@@ -182,6 +226,8 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     startDate: "",
     endDate: "",
   });
+  const [themeForm, setThemeForm] = useState<ThemeFormState>(mapThemeToForm({}));
+  const [isThemeHydrated, setIsThemeHydrated] = useState(false);
   const { toast } = useToast();
 
   const { data: ownerRestaurant, isLoading: restaurantLoading } = useQuery<Restaurant | null>({
@@ -223,6 +269,16 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     enabled: activeTab === "menu" && !!restaurantId,
   });
 
+  const themeQueryKey = ["/api/restaurants", restaurantId, "theme"] as const;
+  const {
+    data: restaurantTheme,
+    isLoading: themeLoading,
+    error: themeError,
+  } = useQuery<RestaurantTheme | null>({
+    queryKey: themeQueryKey,
+    enabled: !!restaurantId,
+  });
+
   const { data: offersData = [], isLoading: offersLoading } = useQuery<SpecialOffer[]>({
     queryKey: ["/api/restaurants", restaurantId, "offers"],
     enabled: activeTab === "menu" && !!restaurantId,
@@ -230,6 +286,28 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
 
   const menuItems = menuData?.items || [];
   const menuCategories = menuData?.categories || [];
+  const hasCustomTheme =
+    !!restaurantTheme?.menuThemePrimary ||
+    !!restaurantTheme?.menuThemeAccent ||
+    !!restaurantTheme?.menuThemeBackground ||
+    !!restaurantTheme?.menuThemeForeground ||
+    !!restaurantTheme?.menuThemeCard;
+
+  useEffect(() => {
+    if (!ownerRestaurant) {
+      return;
+    }
+    setThemeForm(mapThemeToForm(ownerRestaurant));
+    setIsThemeHydrated(true);
+  }, [ownerRestaurant]);
+
+  useEffect(() => {
+    if (!restaurantTheme) {
+      return;
+    }
+    setThemeForm(mapThemeToForm(restaurantTheme));
+    setIsThemeHydrated(true);
+  }, [restaurantTheme]);
 
   const filteredMenuItems = selectedCategoryFilter === "all"
     ? menuItems
@@ -265,6 +343,9 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         price: data.price,
         imageUrl: data.imageUrl || null,
         calories: data.calories ? parseInt(data.calories) : null,
+        proteinGrams: data.proteinGrams || null,
+        carbsGrams: data.carbsGrams || null,
+        fatGrams: data.fatGrams || null,
         categoryId: data.categoryId ? parseInt(data.categoryId) : null,
         isVegan: data.isVegan,
         isVegetarian: data.isVegetarian,
@@ -292,6 +373,9 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         price: data.price,
         imageUrl: data.imageUrl || null,
         calories: data.calories ? parseInt(data.calories) : null,
+        proteinGrams: data.proteinGrams || null,
+        carbsGrams: data.carbsGrams || null,
+        fatGrams: data.fatGrams || null,
         categoryId: data.categoryId ? parseInt(data.categoryId) : null,
         isVegan: data.isVegan,
         isVegetarian: data.isVegetarian,
@@ -429,6 +513,74 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     },
   });
 
+  const saveThemeMutation = useMutation({
+    mutationFn: async ({
+      restId,
+      data,
+    }: {
+      restId: number;
+      data: {
+        menuThemePrimary: string | null;
+        menuThemeAccent: string | null;
+        menuThemeBackground: string | null;
+        menuThemeForeground: string | null;
+        menuThemeCard: string | null;
+      };
+    }): Promise<RestaurantTheme> => {
+      return apiRequest("PUT", `/api/restaurants/${restId}/theme`, data).then((res) => res.json());
+    },
+    onSuccess: (savedTheme, { restId }) => {
+      queryClient.setQueryData(themeQueryKey, savedTheme);
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "theme"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/theme/current"] });
+      setThemeForm(mapThemeToForm(savedTheme));
+      setIsThemeHydrated(true);
+      toast({ title: "Theme Saved", description: "Customer theme has been updated." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleThemeSave = () => {
+    if (!restaurantId || !isThemeHydrated) {
+      return;
+    }
+    saveThemeMutation.mutate({
+      restId: restaurantId,
+      data: {
+        menuThemePrimary: themeForm.menuThemePrimary,
+        menuThemeAccent: themeForm.menuThemeAccent,
+        menuThemeBackground: themeForm.menuThemeBackground,
+        menuThemeForeground: themeForm.menuThemeForeground,
+        menuThemeCard: themeForm.menuThemeCard,
+      },
+    });
+  };
+
+  const handleThemeReset = () => {
+    if (!restaurantId || !isThemeHydrated) {
+      return;
+    }
+    setThemeForm({
+      menuThemePrimary: DEFAULT_THEME.primary,
+      menuThemeAccent: DEFAULT_THEME.accent,
+      menuThemeBackground: DEFAULT_THEME.background,
+      menuThemeForeground: DEFAULT_THEME.foreground,
+      menuThemeCard: DEFAULT_THEME.card,
+    });
+    saveThemeMutation.mutate({
+      restId: restaurantId,
+      data: {
+        menuThemePrimary: null,
+        menuThemeAccent: null,
+        menuThemeBackground: null,
+        menuThemeForeground: null,
+        menuThemeCard: null,
+      },
+    });
+  };
+
   const resetOfferForm = () => {
     setOfferForm({
       title: "",
@@ -519,6 +671,9 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
       price: "",
       imageUrl: "",
       calories: "",
+      proteinGrams: "",
+      carbsGrams: "",
+      fatGrams: "",
       categoryId: "",
       isVegan: false,
       isVegetarian: false,
@@ -544,6 +699,9 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
       price: item.price,
       imageUrl: item.imageUrl || "",
       calories: item.calories?.toString() || "",
+      proteinGrams: item.proteinGrams || "",
+      carbsGrams: item.carbsGrams || "",
+      fatGrams: item.fatGrams || "",
       categoryId: item.categoryId?.toString() || "",
       isVegan: item.isVegan || false,
       isVegetarian: item.isVegetarian || false,
@@ -595,7 +753,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     ? [
         {
           title: "Total Revenue",
-          value: `$${summary.totalRevenue.toFixed(2)}`,
+          value: formatCurrencyTRY(summary.totalRevenue),
           icon: <DollarSign className="w-6 h-6" />,
         },
         {
@@ -610,7 +768,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         },
         {
           title: "Avg. Order Value",
-          value: `$${summary.avgOrderValue.toFixed(2)}`,
+          value: formatCurrencyTRY(summary.avgOrderValue),
           icon: <TrendingUp className="w-6 h-6" />,
         },
       ]
@@ -863,6 +1021,82 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
               </TabsContent>
 
               <TabsContent value="menu" className="space-y-6 mt-0">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Palette className="w-4 h-4" />
+                      Customer Theme
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      If empty, MyDine default theme is used on customer auth, menu and orders screens.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-primary">Primary</Label>
+                        <Input
+                          id="theme-primary"
+                          type="color"
+                          value={themeForm.menuThemePrimary}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemePrimary: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-accent">Accent</Label>
+                        <Input
+                          id="theme-accent"
+                          type="color"
+                          value={themeForm.menuThemeAccent}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemeAccent: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-background">Background</Label>
+                        <Input
+                          id="theme-background"
+                          type="color"
+                          value={themeForm.menuThemeBackground}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemeBackground: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-foreground">Text</Label>
+                        <Input
+                          id="theme-foreground"
+                          type="color"
+                          value={themeForm.menuThemeForeground}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemeForeground: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-card">Card</Label>
+                        <Input
+                          id="theme-card"
+                          type="color"
+                          value={themeForm.menuThemeCard}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemeCard: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {hasCustomTheme ? <Badge variant="secondary">Custom theme active</Badge> : <Badge variant="outline">Using defaults</Badge>}
+                      <Button size="sm" onClick={handleThemeSave} disabled={saveThemeMutation.isPending || themeLoading || !isThemeHydrated}>
+                        {saveThemeMutation.isPending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                        Save Theme
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={handleThemeReset} disabled={saveThemeMutation.isPending || themeLoading || !isThemeHydrated}>
+                        Reset to Default
+                      </Button>
+                    </div>
+                    {themeError ? (
+                      <p className="text-xs text-destructive">
+                        Theme settings could not be loaded. Please refresh and try again.
+                      </p>
+                    ) : null}
+                  </CardContent>
+                </Card>
+
                 {/* Category Management Section */}
                 <Card>
                   <CardHeader className="pb-3">
@@ -1010,7 +1244,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                                   </div>
                                   <p className="text-sm font-medium text-primary mt-1">
                                     {offer.discountType === "percentage" && `${offer.discountValue}% OFF`}
-                                    {offer.discountType === "fixed_amount" && `$${parseFloat(offer.discountValue).toFixed(2)} OFF`}
+                                    {offer.discountType === "fixed_amount" && `${formatCurrencyTRY(offer.discountValue)} OFF`}
                                     {offer.discountType === "bogo" && "Buy One Get One"}
                                   </p>
                                   {linkedItem && (
@@ -1108,7 +1342,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                             <div className="flex items-start justify-between gap-2">
                               <div>
                                 <h3 className="font-semibold">{item.name}</h3>
-                                <p className="text-lg font-bold text-primary">${parseFloat(item.price).toFixed(2)}</p>
+                                <p className="text-lg font-bold text-primary">{formatCurrencyTRY(item.price)}</p>
                               </div>
                               {item.isSoldOut && <Badge variant="destructive">Sold Out</Badge>}
                             </div>
@@ -1119,7 +1353,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                               {itemOffer && (
                                 <Badge className="bg-orange-500 text-white">
                                   {itemOffer.discountType === "percentage" && `${itemOffer.discountValue}% OFF`}
-                                  {itemOffer.discountType === "fixed_amount" && `$${parseFloat(itemOffer.discountValue).toFixed(2)} OFF`}
+                                  {itemOffer.discountType === "fixed_amount" && `${formatCurrencyTRY(itemOffer.discountValue)} OFF`}
                                   {itemOffer.discountType === "bogo" && "BOGO"}
                                 </Badge>
                               )}
@@ -1404,6 +1638,47 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                 data-testid="input-menu-calories"
               />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="proteinGrams">Protein (g)</Label>
+                <Input
+                  id="proteinGrams"
+                  value={menuForm.proteinGrams}
+                  onChange={(e) => setMenuForm({ ...menuForm, proteinGrams: e.target.value })}
+                  placeholder="24.5"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  data-testid="input-menu-protein"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="carbsGrams">Carbs (g)</Label>
+                <Input
+                  id="carbsGrams"
+                  value={menuForm.carbsGrams}
+                  onChange={(e) => setMenuForm({ ...menuForm, carbsGrams: e.target.value })}
+                  placeholder="38.0"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  data-testid="input-menu-carbs"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="fatGrams">Fat (g)</Label>
+                <Input
+                  id="fatGrams"
+                  value={menuForm.fatGrams}
+                  onChange={(e) => setMenuForm({ ...menuForm, fatGrams: e.target.value })}
+                  placeholder="12.0"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  data-testid="input-menu-fat"
+                />
+              </div>
+            </div>
             <div className="space-y-2">
               <Label>Category</Label>
               <Select
@@ -1524,14 +1799,14 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="percentage">Percentage (%)</SelectItem>
-                    <SelectItem value="fixed_amount">Fixed Amount ($)</SelectItem>
+                    <SelectItem value="fixed_amount">Fixed Amount (TL)</SelectItem>
                     <SelectItem value="bogo">Buy One Get One</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="discountValue">
-                  {offerForm.discountType === "percentage" ? "Discount (%)" : offerForm.discountType === "fixed_amount" ? "Amount ($)" : "Value"} *
+                  {offerForm.discountType === "percentage" ? "Discount (%)" : offerForm.discountType === "fixed_amount" ? "Amount (TL)" : "Value"} *
                 </Label>
                 <Input
                   id="discountValue"
@@ -1556,7 +1831,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                   <SelectItem value="none">All Items (General Offer)</SelectItem>
                   {menuItems.map((item) => (
                     <SelectItem key={item.id} value={item.id.toString()}>
-                      {item.name} — ${parseFloat(item.price).toFixed(2)}
+                      {item.name} — {formatCurrencyTRY(item.price)}
                     </SelectItem>
                   ))}
                 </SelectContent>

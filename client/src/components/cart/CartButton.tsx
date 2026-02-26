@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { ShoppingCart } from "lucide-react";
+import { formatCurrencyTRY } from "@/lib/currency";
 
 interface CartButtonProps {
   itemCount: number;
@@ -28,7 +29,7 @@ export default function CartButton({ itemCount, total, onClick }: CartButtonProp
             </div>
             <span>View Cart</span>
           </div>
-          <span className="font-bold" data-testid="text-cart-button-total">${total.toFixed(2)}</span>
+          <span className="font-bold" data-testid="text-cart-button-total">{formatCurrencyTRY(total)}</span>
         </div>
       </Button>
     </div>

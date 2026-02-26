@@ -110,7 +110,7 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-orange-50 via-background to-background p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-background via-background to-card p-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -147,7 +147,7 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
               style={{ width: 20 }}
               animate={{
                 scale: i === digitCount - 1 && digitCount > 0 ? [1, 1.3, 1] : 1,
-                backgroundColor: i < digitCount ? "#fb7185" : "#e5e5e5",
+                backgroundColor: i < digitCount ? "hsl(var(--primary))" : "hsl(var(--muted))",
               }}
               transition={{ type: "spring", stiffness: 500, damping: 20 }}
             />
@@ -164,7 +164,7 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
               value={phone}
               onChange={handlePhoneChange}
               onKeyDown={handleKeyDown}
-              className="pl-12 pr-12 h-14 text-lg text-center tracking-wider font-medium rounded-xl border-2 focus:border-rose-400 transition-colors"
+              className="pl-12 pr-12 h-14 text-lg text-center tracking-wider font-medium rounded-xl border-2 focus:border-primary transition-colors"
               data-testid="input-customer-phone"
               disabled={isLoading}
               autoFocus
@@ -190,10 +190,10 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
                 transition={{ type: "spring", stiffness: 350, damping: 30 }}
                 className="overflow-hidden"
               >
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-800 relative">
+                <div className="bg-accent border border-border rounded-xl p-3 text-sm text-foreground relative">
                   <button
                     type="button"
-                    className="absolute top-2 right-2 text-blue-400 hover:text-blue-600"
+                    className="absolute top-2 right-2 text-muted-foreground hover:text-foreground"
                     onClick={() => setShowInfo(false)}
                   >
                     <X className="w-4 h-4" />
@@ -228,7 +228,7 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    className="pl-12 pr-4 h-14 text-lg text-center font-medium rounded-xl border-2 focus:border-rose-400 transition-colors"
+                    className="pl-12 pr-4 h-14 text-lg text-center font-medium rounded-xl border-2 focus:border-primary transition-colors"
                     data-testid="input-customer-name"
                     disabled={isLoading}
                     autoFocus

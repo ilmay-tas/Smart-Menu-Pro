@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { ShoppingCart, CreditCard } from "lucide-react";
 import CartItem, { type CartItemData } from "./CartItem";
+import { formatCurrencyTRY } from "@/lib/currency";
 import {
   Dialog,
   DialogContent,
@@ -100,16 +101,16 @@ export default function CartSheet({
                 <Separator />
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span data-testid="text-cart-subtotal">${subtotal.toFixed(2)}</span>
+                  <span data-testid="text-cart-subtotal">{formatCurrencyTRY(subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Tax (10%)</span>
-                  <span data-testid="text-cart-tax">${tax.toFixed(2)}</span>
+                  <span data-testid="text-cart-tax">{formatCurrencyTRY(tax)}</span>
                 </div>
                 <Separator />
                 <div className="flex justify-between font-semibold text-lg">
                   <span>Total</span>
-                  <span data-testid="text-cart-total">${total.toFixed(2)}</span>
+                  <span data-testid="text-cart-total">{formatCurrencyTRY(total)}</span>
                 </div>
               </div>
 
@@ -121,7 +122,7 @@ export default function CartSheet({
                   data-testid="button-checkout"
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
-                  Place Order - ${total.toFixed(2)}
+                  Place Order - {formatCurrencyTRY(total)}
                 </Button>
               </SheetFooter>
             </>
@@ -144,13 +145,13 @@ export default function CartSheet({
                   <span>
                     {item.quantity}x {item.name}
                   </span>
-                  <span>${(item.price * item.quantity).toFixed(2)}</span>
+                  <span>{formatCurrencyTRY(item.price * item.quantity)}</span>
                 </div>
               ))}
               <Separator className="my-2" />
               <div className="flex justify-between font-semibold">
                 <span>Total</span>
-                <span>${total.toFixed(2)}</span>
+                <span>{formatCurrencyTRY(total)}</span>
               </div>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import type { Server } from "http";
 import session from "express-session";
 import bcrypt from "bcryptjs";
@@ -83,6 +83,75 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       },
     })
   );
+
+  const isValidHexColor = (value: string): boolean => /^#([0-9a-fA-F]{6})$/.test(value);
+
+  const resolveRestaurantIdFromRequest = (req: Request): number | null => {
+    if (req.query.restaurantId) {
+      const parsed = parseInt(req.query.restaurantId as string, 10);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+
+    if (req.session.restaurantId) {
+      return req.session.restaurantId;
+    }
+
+    return 2;
+  };
+
+  const parsePersonalizedFlag = (req: Request): boolean =>
+    req.query.personalized === "true";
+
+  const buildCustomerMenuResponse = async (
+    items: Awaited<ReturnType<typeof storage.getMenuItems>>,
+    categoryMap: Record<number, string>,
+    rankingMetaByItemId?: Map<number, { rankingScore: number; reasonLabel: string; reasonCodes: string[] }>,
+  ) => {
+    return Promise.all(
+      items.map(async (item) => {
+        const mods = await storage.getModifiersForItem(item.id);
+        const rankingMeta = rankingMetaByItemId?.get(item.id);
+        return {
+          id: String(item.id),
+          name: item.name,
+          description: item.description || "",
+          price: item.price,
+          image: item.imageUrl || "/menu/default.png",
+          category: item.categoryId ? categoryMap[item.categoryId] || "Other" : "Other",
+          isVegan: item.isVegan,
+          isVegetarian: item.isVegetarian,
+          isGlutenFree: item.isGlutenFree,
+          isDairyFree: item.isDairyFree,
+          isNutFree: item.isNutFree,
+          isHalal: item.isHalal,
+          isKosher: item.isKosher,
+          isSpicy: item.isSpicy,
+          spiceLevel: item.spiceLevel,
+          allergens: item.allergens,
+          cuisineType: item.cuisineType,
+          proteinType: item.proteinType,
+          cookingMethod: item.cookingMethod,
+          mealType: item.mealType,
+          isAlcoholic: item.isAlcoholic,
+          isCaffeinated: item.isCaffeinated,
+          isOrganic: item.isOrganic,
+          isLocallySourced: item.isLocallySourced,
+          calories: item.calories,
+          protein: item.proteinGrams,
+          carbs: item.carbsGrams,
+          fat: item.fatGrams,
+          rankingScore: rankingMeta?.rankingScore,
+          reasonLabel: rankingMeta?.reasonLabel,
+          reasonCodes: rankingMeta?.reasonCodes,
+          modifiers: mods.map((m) => ({
+            id: String(m.id),
+            name: m.name,
+            price: m.additionalCost,
+          })),
+        };
+      }),
+    );
+  };
 
   // ============ STAFF AUTH ============
   app.post("/api/staff/signup", async (req, res) => {
@@ -227,16 +296,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // ============ MENU ============
   app.get("/api/menu", async (req, res) => {
     try {
-      // Determine restaurant: use query param, session, or find the first active restaurant
-      let restaurantId: number | null = null;
-      if (req.query.restaurantId) {
-        restaurantId = parseInt(req.query.restaurantId as string);
-      } else if (req.session.restaurantId) {
-        restaurantId = req.session.restaurantId;
-      } else {
-        // Fallback: use a fixed default restaurant id
-        restaurantId = 2;
-      }
+      // Determine restaurant: use query param, session, or fallback default.
+      const restaurantId = resolveRestaurantIdFromRequest(req);
 
       if (restaurantId) {
         req.session.restaurantId = restaurantId;
@@ -250,30 +311,32 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         ? await storage.getCategoriesByRestaurant(restaurantId)
         : await storage.getCategories();
       const categoryMap = Object.fromEntries(cats.map((c) => [c.id, c.name]));
-      
-      const itemsWithDetails = await Promise.all(
-        nonSoldOut.map(async (item) => {
-          const mods = await storage.getModifiersForItem(item.id);
-          return {
-            id: String(item.id),
-            name: item.name,
-            description: item.description || "",
-            price: item.price,
-            image: item.imageUrl || "/menu/default.png",
-            category: item.categoryId ? categoryMap[item.categoryId] || "Other" : "Other",
-            isVegan: item.isVegan,
-            isVegetarian: item.isVegetarian,
-            isGlutenFree: item.isGlutenFree,
-            isSpicy: item.isSpicy,
-            allergens: item.allergens,
-            modifiers: mods.map((m) => ({
-              id: String(m.id),
-              name: m.name,
-              price: m.additionalCost,
-            })),
-          };
-        })
-      );
+
+      let sortedItems = nonSoldOut;
+      let rankingMetaByItemId: Map<number, { rankingScore: number; reasonLabel: string; reasonCodes: string[] }> | undefined;
+      if (parsePersonalizedFlag(req) && req.session.userType === "customer" && req.session.customerId) {
+        const ranked = await storage.rankMenuItemsForCustomer(
+          req.session.customerId,
+          nonSoldOut,
+          restaurantId ?? undefined,
+          nonSoldOut.length,
+        );
+        if (ranked.length > 0) {
+          sortedItems = ranked.map((entry) => entry.item);
+          rankingMetaByItemId = new Map(
+            ranked.map((entry) => [
+              entry.item.id,
+              {
+                rankingScore: entry.rankingScore,
+                reasonLabel: entry.reasonLabel,
+                reasonCodes: entry.reasonCodes,
+              },
+            ]),
+          );
+        }
+      }
+
+      const itemsWithDetails = await buildCustomerMenuResponse(sortedItems, categoryMap, rankingMetaByItemId);
       res.json(itemsWithDetails);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -876,6 +939,32 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
+  app.get("/api/theme/current", async (req, res) => {
+    try {
+      const restaurantId = resolveRestaurantIdFromRequest(req);
+      if (!restaurantId) {
+        return res.json(null);
+      }
+
+      req.session.restaurantId = restaurantId;
+      const restaurant = await storage.getRestaurant(restaurantId);
+      if (!restaurant) {
+        return res.json(null);
+      }
+
+      res.json({
+        restaurantId: restaurant.id,
+        menuThemePrimary: restaurant.menuThemePrimary,
+        menuThemeAccent: restaurant.menuThemeAccent,
+        menuThemeBackground: restaurant.menuThemeBackground,
+        menuThemeForeground: restaurant.menuThemeForeground,
+        menuThemeCard: restaurant.menuThemeCard,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/owner/restaurant", async (req, res) => {
     try {
       if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
@@ -897,6 +986,98 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       res.json(restaurant);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/restaurants/:id/theme", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+
+      const restaurantId = parseInt(req.params.id, 10);
+      if (Number.isNaN(restaurantId)) {
+        return res.status(400).json({ error: "Invalid restaurant id" });
+      }
+      const restaurant = await storage.getRestaurant(restaurantId);
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+
+      res.json({
+        restaurantId: restaurant.id,
+        menuThemePrimary: restaurant.menuThemePrimary,
+        menuThemeAccent: restaurant.menuThemeAccent,
+        menuThemeBackground: restaurant.menuThemeBackground,
+        menuThemeForeground: restaurant.menuThemeForeground,
+        menuThemeCard: restaurant.menuThemeCard,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/restaurants/:id/theme", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+
+      const restaurantId = parseInt(req.params.id, 10);
+      if (Number.isNaN(restaurantId)) {
+        return res.status(400).json({ error: "Invalid restaurant id" });
+      }
+      const restaurant = await storage.getRestaurant(restaurantId);
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+
+      const themeFields = [
+        "menuThemePrimary",
+        "menuThemeAccent",
+        "menuThemeBackground",
+        "menuThemeForeground",
+        "menuThemeCard",
+      ] as const;
+
+      const updateData: Record<string, string | null> = {};
+      for (const field of themeFields) {
+        if (!(field in (req.body ?? {}))) {
+          continue;
+        }
+        const rawValue = req.body[field];
+
+        if (rawValue === null || rawValue === "") {
+          updateData[field] = null;
+          continue;
+        }
+
+        if (typeof rawValue !== "string" || !isValidHexColor(rawValue)) {
+          return res.status(400).json({ error: `${field} must be a valid hex color like #ff3366` });
+        }
+
+        updateData[field] = rawValue;
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ error: "No theme updates were provided" });
+      }
+
+      const updated = await storage.updateRestaurant(restaurantId, updateData);
+      if (!updated) {
+        return res.status(404).json({ error: "Restaurant not found" });
+      }
+
+      res.json({
+        restaurantId: updated.id,
+        menuThemePrimary: updated.menuThemePrimary,
+        menuThemeAccent: updated.menuThemeAccent,
+        menuThemeBackground: updated.menuThemeBackground,
+        menuThemeForeground: updated.menuThemeForeground,
+        menuThemeCard: updated.menuThemeCard,
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update theme" });
     }
   });
 
@@ -1196,31 +1377,39 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(401).json({ error: "Customer authentication required" });
       }
 
-      const restaurantId = req.session.restaurantId;
-      const suggestions = await storage.getSuggestedItems(req.session.customerId, 6, restaurantId);
+      const restaurantId = resolveRestaurantIdFromRequest(req);
+      if (restaurantId) {
+        req.session.restaurantId = restaurantId;
+      }
+      const suggestions = await storage.getSuggestedItems(req.session.customerId, 6, restaurantId ?? undefined);
       const cats = restaurantId
         ? await storage.getCategoriesByRestaurant(restaurantId)
         : await storage.getCategories();
       const categoryMap = Object.fromEntries(cats.map((c) => [c.id, c.name]));
 
       const transformedItems = await Promise.all(suggestions.map(async (item) => {
-        const itemModifiers = await storage.getModifiersForItem(item.id);
+        const menuItem = item.item;
+        const itemModifiers = await storage.getModifiersForItem(menuItem.id);
         return {
-          id: String(item.id),
-          name: item.name,
-          description: item.description || "",
-          price: item.price,
-          image: item.imageUrl || "",
-          category: item.categoryId ? categoryMap[item.categoryId] || "Other" : "Other",
-          isVegan: item.isVegan,
-          isGlutenFree: item.isGlutenFree,
-          isSpicy: item.isSpicy,
-          allergens: item.allergens,
+          id: String(menuItem.id),
+          name: menuItem.name,
+          description: menuItem.description || "",
+          price: menuItem.price,
+          image: menuItem.imageUrl || "",
+          category: menuItem.categoryId ? categoryMap[menuItem.categoryId] || "Other" : "Other",
+          isVegan: menuItem.isVegan,
+          isVegetarian: menuItem.isVegetarian,
+          isGlutenFree: menuItem.isGlutenFree,
+          isSpicy: menuItem.isSpicy,
+          allergens: menuItem.allergens,
           modifiers: itemModifiers.map((m) => ({ id: String(m.id), name: m.name, price: m.additionalCost })),
-          calories: item.calories,
-          protein: item.proteinGrams,
-          carbs: item.carbsGrams,
-          fat: item.fatGrams,
+          calories: menuItem.calories,
+          protein: menuItem.proteinGrams,
+          carbs: menuItem.carbsGrams,
+          fat: menuItem.fatGrams,
+          rankingScore: item.rankingScore,
+          reasonLabel: item.reasonLabel,
+          reasonCodes: item.reasonCodes,
         };
       }));
 
@@ -1347,15 +1536,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // ============ MENU WITH FILTER ============
   app.get("/api/menu/filtered", async (req, res) => {
     try {
-      // Determine restaurant context
-      let restaurantId: number | null = null;
-      if (req.query.restaurantId) {
-        restaurantId = parseInt(req.query.restaurantId as string);
-      } else if (req.session.restaurantId) {
-        restaurantId = req.session.restaurantId;
-      } else {
-        restaurantId = 2;
-      }
+      // Determine restaurant context.
+      const restaurantId = resolveRestaurantIdFromRequest(req);
 
       if (restaurantId) {
         req.session.restaurantId = restaurantId;
@@ -1416,46 +1598,31 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         }
       }
 
-      const itemsWithDetails = await Promise.all(
-        filteredItems.map(async (item) => {
-          const mods = await storage.getModifiersForItem(item.id);
-          return {
-            id: String(item.id),
-            name: item.name,
-            description: item.description || "",
-            price: item.price,
-            image: item.imageUrl || "/menu/default.png",
-            category: item.categoryId ? categoryMap[item.categoryId] || "Other" : "Other",
-            isVegan: item.isVegan,
-            isVegetarian: item.isVegetarian,
-            isGlutenFree: item.isGlutenFree,
-            isDairyFree: item.isDairyFree,
-            isNutFree: item.isNutFree,
-            isHalal: item.isHalal,
-            isKosher: item.isKosher,
-            isSpicy: item.isSpicy,
-            spiceLevel: item.spiceLevel,
-            allergens: item.allergens,
-            cuisineType: item.cuisineType,
-            proteinType: item.proteinType,
-            cookingMethod: item.cookingMethod,
-            mealType: item.mealType,
-            isAlcoholic: item.isAlcoholic,
-            isCaffeinated: item.isCaffeinated,
-            isOrganic: item.isOrganic,
-            isLocallySourced: item.isLocallySourced,
-            calories: item.calories,
-            protein: item.proteinGrams,
-            carbs: item.carbsGrams,
-            fat: item.fatGrams,
-            modifiers: mods.map((m) => ({
-              id: String(m.id),
-              name: m.name,
-              price: m.additionalCost,
-            })),
-          };
-        })
-      );
+      let sortedItems = filteredItems;
+      let rankingMetaByItemId: Map<number, { rankingScore: number; reasonLabel: string; reasonCodes: string[] }> | undefined;
+      if (parsePersonalizedFlag(req) && req.session.userType === "customer" && req.session.customerId) {
+        const ranked = await storage.rankMenuItemsForCustomer(
+          req.session.customerId,
+          filteredItems,
+          restaurantId ?? undefined,
+          filteredItems.length,
+        );
+        if (ranked.length > 0) {
+          sortedItems = ranked.map((entry) => entry.item);
+          rankingMetaByItemId = new Map(
+            ranked.map((entry) => [
+              entry.item.id,
+              {
+                rankingScore: entry.rankingScore,
+                reasonLabel: entry.reasonLabel,
+                reasonCodes: entry.reasonCodes,
+              },
+            ]),
+          );
+        }
+      }
+
+      const itemsWithDetails = await buildCustomerMenuResponse(sortedItems, categoryMap, rankingMetaByItemId);
       res.json(itemsWithDetails);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

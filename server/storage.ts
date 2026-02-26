@@ -39,6 +39,11 @@ import {
   type SpecialOffer,
   type InsertSpecialOffer,
 } from "@shared/schema";
+import {
+  rankPersonalizedMenuItems,
+  type CustomerHistorySignal,
+  type RankedMenuItem,
+} from "./recommendation/ranking";
 
 export interface IStorage {
   // Staff
@@ -128,8 +133,10 @@ export interface IStorage {
   // Customer Orders with nutrition
   getOrdersWithNutrition(customerId: number): Promise<(OrderTicket & { items: (OrderItem & { menuItem: MenuItem })[] })[]>;
 
-  // Suggested items based on order history
-  getSuggestedItems(customerId: number, limit?: number, restaurantId?: number): Promise<MenuItem[]>;
+  // Suggested items based on personalized ranking
+  getSuggestedItems(customerId: number, limit?: number, restaurantId?: number): Promise<RankedMenuItem[]>;
+  rankMenuItemsForCustomer(customerId: number, items: MenuItem[], restaurantId?: number, limit?: number): Promise<RankedMenuItem[]>;
+  getPopularityByItemId(restaurantId?: number): Promise<Map<number, number>>;
   getPopularItems(limit?: number, restaurantId?: number): Promise<MenuItem[]>;
 
   // Feedback
@@ -594,65 +601,117 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  // Get suggested items based on customer order history
-  async getSuggestedItems(customerId: number, limit: number = 6, restaurantId?: number): Promise<MenuItem[]> {
-    // Get customer's order history to find frequently ordered categories
-    const orderWhere = restaurantId
-      ? and(eq(orderTickets.customerId, customerId), eq(orderTickets.restaurantId, restaurantId))
-      : eq(orderTickets.customerId, customerId);
-    const customerOrders = await db.select().from(orderTickets).where(orderWhere);
-    
-    if (customerOrders.length === 0) {
-      // No order history, return popular items
-      return this.getPopularItems(limit, restaurantId);
+  async getPopularityByItemId(restaurantId?: number): Promise<Map<number, number>> {
+    const popularityRows = restaurantId
+      ? await db
+          .select({
+            menuItemId: orderItems.menuItemId,
+            popularity: sql<number>`COALESCE(SUM(${orderItems.quantity}), 0)`.as("popularity"),
+          })
+          .from(orderItems)
+          .innerJoin(orderTickets, eq(orderItems.orderId, orderTickets.id))
+          .where(eq(orderTickets.restaurantId, restaurantId))
+          .groupBy(orderItems.menuItemId)
+      : await db
+          .select({
+            menuItemId: orderItems.menuItemId,
+            popularity: sql<number>`COALESCE(SUM(${orderItems.quantity}), 0)`.as("popularity"),
+          })
+          .from(orderItems)
+          .groupBy(orderItems.menuItemId);
+
+    const popularityByItem = new Map<number, number>();
+    for (const row of popularityRows) {
+      popularityByItem.set(row.menuItemId, Number(row.popularity) || 0);
+    }
+    return popularityByItem;
+  }
+
+  async rankMenuItemsForCustomer(
+    customerId: number,
+    items: MenuItem[],
+    restaurantId?: number,
+    limit?: number,
+  ): Promise<RankedMenuItem[]> {
+    if (items.length === 0) {
+      return [];
     }
 
-    const orderIds = customerOrders.map(o => o.id);
-    
-    // Get all ordered item IDs
-    const orderedItems = await db.select().from(orderItems)
-      .where(sql`${orderItems.orderId} = ANY(${orderIds})`);
-    
-    const orderedMenuItemIds = orderedItems.map(oi => oi.menuItemId);
-    
-    if (orderedMenuItemIds.length === 0) {
-      return this.getPopularItems(limit, restaurantId);
+    const historyRows = restaurantId
+      ? await db
+          .select({
+            menuItemId: orderItems.menuItemId,
+            categoryId: menuItems.categoryId,
+            quantity: orderItems.quantity,
+            unitPrice: orderItems.unitPrice,
+            createdAt: orderTickets.createdAt,
+          })
+          .from(orderItems)
+          .innerJoin(orderTickets, eq(orderItems.orderId, orderTickets.id))
+          .innerJoin(menuItems, eq(orderItems.menuItemId, menuItems.id))
+          .where(and(eq(orderTickets.customerId, customerId), eq(orderTickets.restaurantId, restaurantId)))
+      : await db
+          .select({
+            menuItemId: orderItems.menuItemId,
+            categoryId: menuItems.categoryId,
+            quantity: orderItems.quantity,
+            unitPrice: orderItems.unitPrice,
+            createdAt: orderTickets.createdAt,
+          })
+          .from(orderItems)
+          .innerJoin(orderTickets, eq(orderItems.orderId, orderTickets.id))
+          .innerJoin(menuItems, eq(orderItems.menuItemId, menuItems.id))
+          .where(eq(orderTickets.customerId, customerId));
+
+    const customerHistory: CustomerHistorySignal[] = historyRows.map((row) => ({
+      menuItemId: row.menuItemId,
+      categoryId: row.categoryId,
+      quantity: row.quantity,
+      unitPrice: Number.parseFloat(row.unitPrice),
+      createdAt: row.createdAt,
+    }));
+
+    const [preferences, popularityByItemId, activeOffers] = await Promise.all([
+      this.getCustomerPreferences(customerId),
+      this.getPopularityByItemId(restaurantId),
+      restaurantId ? this.getActiveOffersByRestaurant(restaurantId) : this.getAllActiveOffers(),
+    ]);
+
+    return rankPersonalizedMenuItems({
+      candidates: items,
+      customerHistory,
+      preferences,
+      popularityByItemId,
+      activeOffers,
+      limit,
+    });
+  }
+
+  // Get suggested items based on personalized ranking
+  async getSuggestedItems(customerId: number, limit: number = 6, restaurantId?: number): Promise<RankedMenuItem[]> {
+    const candidates = restaurantId
+      ? await this.getMenuItemsByRestaurant(restaurantId)
+      : await this.getMenuItems();
+
+    const ranked = await this.rankMenuItemsForCustomer(
+      customerId,
+      candidates.filter((item) => !item.isSoldOut),
+      restaurantId,
+      limit,
+    );
+
+    if (ranked.length > 0) {
+      return ranked;
     }
 
-    // Get the categories of ordered items
-    const orderedMenuItems = await db.select().from(menuItems)
-      .where(sql`${menuItems.id} = ANY(${orderedMenuItemIds})`);
-    
-    const categoryIdSet = new Set(orderedMenuItems.filter(m => m.categoryId).map(m => m.categoryId));
-    const categoryIds = Array.from(categoryIdSet).filter((id): id is number => id !== null);
-    
-    // Get items from same categories that customer hasn't ordered yet
-    let suggestions: MenuItem[] = [];
-    
-    if (categoryIds.length > 0) {
-      suggestions = await db.select().from(menuItems)
-        .where(and(
-          sql`${menuItems.categoryId} = ANY(${categoryIds})`,
-          sql`${menuItems.id} != ALL(${orderedMenuItemIds})`,
-          eq(menuItems.isSoldOut, false),
-          restaurantId ? eq(menuItems.restaurantId, restaurantId) : sql`TRUE`
-        ))
-        .limit(limit);
-    }
-    
-    // If not enough suggestions, add popular items
-    if (suggestions.length < limit) {
-      const popular = await this.getPopularItems(limit - suggestions.length, restaurantId);
-      const existingIds = new Set(suggestions.map(s => s.id));
-      for (const item of popular) {
-        if (!existingIds.has(item.id) && !orderedMenuItemIds.includes(item.id)) {
-          suggestions.push(item);
-          if (suggestions.length >= limit) break;
-        }
-      }
-    }
-    
-    return suggestions;
+    // Fallback when customer has no usable signals/preferences.
+    return (await this.getPopularItems(limit, restaurantId)).map((item) => ({
+      item,
+      rankingScore: 0,
+      reasonCodes: ["popular_in_restaurant"],
+      reasonLabel: "Popular at this restaurant",
+      scoreBreakdown: { fallback: 1 },
+    }));
   }
 
   // Feedback
@@ -711,44 +770,55 @@ export class DatabaseStorage implements IStorage {
 
   // Get popular items based on order frequency
   async getPopularItems(limit: number = 6, restaurantId?: number): Promise<MenuItem[]> {
-    // Get most ordered items
-    const popularItemIds = restaurantId
-      ? await db.select({
-          menuItemId: orderItems.menuItemId,
-          orderCount: sql<number>`count(*)`.as("order_count")
-        })
+    const popularRows = restaurantId
+      ? await db
+          .select({
+            menuItemId: orderItems.menuItemId,
+            popularity: sql<number>`COALESCE(SUM(${orderItems.quantity}), 0)`.as("popularity"),
+          })
           .from(orderItems)
           .innerJoin(orderTickets, eq(orderItems.orderId, orderTickets.id))
           .where(eq(orderTickets.restaurantId, restaurantId))
           .groupBy(orderItems.menuItemId)
-          .orderBy(sql`count(*) DESC`)
+          .orderBy(sql`COALESCE(SUM(${orderItems.quantity}), 0) DESC`)
           .limit(limit)
-      : await db.select({
-          menuItemId: orderItems.menuItemId,
-          orderCount: sql<number>`count(*)`.as("order_count")
-        })
+      : await db
+          .select({
+            menuItemId: orderItems.menuItemId,
+            popularity: sql<number>`COALESCE(SUM(${orderItems.quantity}), 0)`.as("popularity"),
+          })
           .from(orderItems)
           .groupBy(orderItems.menuItemId)
-          .orderBy(sql`count(*) DESC`)
+          .orderBy(sql`COALESCE(SUM(${orderItems.quantity}), 0) DESC`)
           .limit(limit);
-    
-    if (popularItemIds.length === 0) {
-      // No orders yet, return some random available items
+
+    if (popularRows.length === 0) {
       return restaurantId
-        ? db.select().from(menuItems)
+        ? db
+            .select()
+            .from(menuItems)
             .where(and(eq(menuItems.isSoldOut, false), eq(menuItems.restaurantId, restaurantId)))
             .limit(limit)
-        : db.select().from(menuItems)
+        : db
+            .select()
+            .from(menuItems)
             .where(eq(menuItems.isSoldOut, false))
             .limit(limit);
     }
-    
-    const ids = popularItemIds.map((p: any) => p.menuItemId);
-    return restaurantId
-      ? db.select().from(menuItems)
-          .where(and(sql`${menuItems.id} = ANY(${ids})`, eq(menuItems.restaurantId, restaurantId)))
-      : db.select().from(menuItems)
-          .where(sql`${menuItems.id} = ANY(${ids})`);
+
+    const ids = popularRows.map((p) => p.menuItemId);
+    const popularItems = restaurantId
+      ? await db
+          .select()
+          .from(menuItems)
+          .where(and(sql`${menuItems.id} = ANY(${ids})`, eq(menuItems.restaurantId, restaurantId), eq(menuItems.isSoldOut, false)))
+      : await db
+          .select()
+          .from(menuItems)
+          .where(and(sql`${menuItems.id} = ANY(${ids})`, eq(menuItems.isSoldOut, false)));
+
+    const itemById = new Map(popularItems.map((item) => [item.id, item]));
+    return ids.map((id) => itemById.get(id)).filter((item): item is MenuItem => Boolean(item));
   }
   // Special Offers
   async getOffersByRestaurant(restaurantId: number): Promise<SpecialOffer[]> {

@@ -7,6 +7,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
+import { formatCurrencyTRY } from "@/lib/currency";
 
 interface TopSellingItem {
   name: string;
@@ -69,7 +70,7 @@ export default function TopSellingChart({
             </div>
             <div className="flex items-center gap-4">
               <span>{item.orders} orders</span>
-              <span className="font-medium">${item.revenue.toFixed(2)}</span>
+              <span className="font-medium">{formatCurrencyTRY(item.revenue)}</span>
             </div>
           </div>
         ))}

@@ -8,6 +8,7 @@ import CartSheet from "@/components/cart/CartSheet";
 import { type CartItemData } from "@/components/cart/CartItem";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { formatCurrencyTRY } from "@/lib/currency";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +67,9 @@ interface MenuItem {
   protein?: string;
   carbs?: string;
   fat?: string;
+  rankingScore?: number;
+  reasonLabel?: string;
+  reasonCodes?: string[];
 }
 
 interface OrderItemWithNutrition {
@@ -139,6 +143,16 @@ interface CustomerMenuProps {
   onLogout: () => void;
 }
 
+interface ActiveOffer {
+  id: number;
+  menuItemId: number | null;
+  title: string;
+  description: string | null;
+  discountType: "percentage" | "fixed_amount" | "bogo";
+  discountValue: string;
+  isActive: boolean | null;
+}
+
 const statusLabels: Record<CustomerOrderWithNutrition["status"], string> = {
   new: "Order Received",
   in_progress: "Being Prepared",
@@ -179,7 +193,9 @@ export default function CustomerMenu({
   const { data: menuItems = [], isLoading } = useQuery<MenuItem[]>({
     queryKey: ["/api/menu/filtered", isFilterApplied],
     queryFn: async () => {
-      const url = isFilterApplied ? "/api/menu/filtered?applyFilter=true" : "/api/menu";
+      const url = isFilterApplied
+        ? "/api/menu/filtered?applyFilter=true&personalized=true"
+        : "/api/menu?personalized=true";
       const res = await apiRequest("GET", url);
       return res.json();
     },
@@ -199,17 +215,9 @@ export default function CustomerMenu({
     queryKey: ["/api/customer/suggested"],
   });
   const suggestedItems = suggestedData?.items || [];
+  const suggestedItemIds = useMemo(() => new Set(suggestedItems.map((item) => item.id)), [suggestedItems]);
 
   // Fetch active special offers
-  interface ActiveOffer {
-    id: number;
-    menuItemId: number | null;
-    title: string;
-    description: string | null;
-    discountType: "percentage" | "fixed_amount" | "bogo";
-    discountValue: string;
-    isActive: boolean | null;
-  }
   const { data: activeOffers = [] } = useQuery<ActiveOffer[]>({
     queryKey: ["/api/offers/active"],
   });
@@ -329,6 +337,41 @@ export default function CustomerMenu({
     });
   }, [menuItems, activeFilter, activeCategory]);
 
+  const getNutritionParts = (item: Pick<MenuItem, "calories" | "protein" | "carbs" | "fat">): string[] => {
+    const parts: string[] = [];
+    if (item.calories !== null && item.calories !== undefined) {
+      parts.push(`${item.calories} cal`);
+    }
+    if (item.protein !== null && item.protein !== undefined && item.protein !== "") {
+      parts.push(`${item.protein}g protein`);
+    }
+    if (item.carbs !== null && item.carbs !== undefined && item.carbs !== "") {
+      parts.push(`${item.carbs}g carbs`);
+    }
+    if (item.fat !== null && item.fat !== undefined && item.fat !== "") {
+      parts.push(`${item.fat}g fat`);
+    }
+    return parts;
+  };
+
+  const getPricingForItem = (item: Pick<MenuItem, "id" | "price">) => {
+    const originalUnitPrice = parseFloat(item.price);
+    const appliedOffer = activeOffers.find((offer) => offer.menuItemId === parseInt(item.id));
+    let discountedUnitPrice = originalUnitPrice;
+
+    if (appliedOffer?.discountType === "percentage") {
+      discountedUnitPrice = originalUnitPrice * (1 - parseFloat(appliedOffer.discountValue) / 100);
+    } else if (appliedOffer?.discountType === "fixed_amount") {
+      discountedUnitPrice = Math.max(0, originalUnitPrice - parseFloat(appliedOffer.discountValue));
+    }
+
+    return {
+      originalUnitPrice,
+      discountedUnitPrice,
+      appliedOffer,
+    };
+  };
+
   const handleAddToCart = () => {
     if (!selectedItem) return;
 
@@ -336,7 +379,8 @@ export default function CustomerMenu({
       selectedModifiers.includes(m.id)
     ) || [];
     const modifierTotal = modifierDetails.reduce((sum, m) => sum + parseFloat(m.price), 0);
-    const itemPrice = parseFloat(selectedItem.price) + modifierTotal;
+    const { discountedUnitPrice } = getPricingForItem(selectedItem);
+    const itemPrice = discountedUnitPrice + modifierTotal;
 
     const newCartItem: CartItemData = {
       id: `${selectedItem.id}-${Date.now()}`,
@@ -388,7 +432,8 @@ export default function CustomerMenu({
 
   const calculateTotal = () => {
     if (!selectedItem) return 0;
-    let total = parseFloat(selectedItem.price) * quantity;
+    const { discountedUnitPrice } = getPricingForItem(selectedItem);
+    let total = discountedUnitPrice * quantity;
     if (selectedItem.modifiers) {
       selectedItem.modifiers
         .filter((m) => selectedModifiers.includes(m.id))
@@ -546,10 +591,15 @@ export default function CustomerMenu({
                         </div>
                         <div className="p-3">
                           <h3 className="font-medium text-sm truncate">{item.name}</h3>
+                          {item.reasonLabel && (
+                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{item.reasonLabel}</p>
+                          )}
                           <div className="flex items-center justify-between mt-1">
-                            <span className="text-sm font-bold">${parseFloat(item.price).toFixed(2)}</span>
-                            {item.calories && (
-                              <span className="text-xs text-muted-foreground">{item.calories} cal</span>
+                            <span className="text-sm font-bold">{formatCurrencyTRY(item.price)}</span>
+                            {getNutritionParts(item).length > 0 && (
+                              <span className="text-xs text-muted-foreground">
+                                {getNutritionParts(item).join(" · ")}
+                              </span>
                             )}
                           </div>
                         </div>
@@ -575,16 +625,9 @@ export default function CustomerMenu({
               const categoryOrder = categories.filter((c) => c !== "All");
 
               const renderMenuItem = (item: typeof filteredItems[0]) => {
-                const itemOffer = activeOffers.find((o) => o.menuItemId === parseInt(item.id));
-                const originalPrice = parseFloat(item.price);
-                let discountedPrice: number | null = null;
-                if (itemOffer) {
-                  if (itemOffer.discountType === "percentage") {
-                    discountedPrice = originalPrice * (1 - parseFloat(itemOffer.discountValue) / 100);
-                  } else if (itemOffer.discountType === "fixed_amount") {
-                    discountedPrice = Math.max(0, originalPrice - parseFloat(itemOffer.discountValue));
-                  }
-                }
+                const { originalUnitPrice, discountedUnitPrice, appliedOffer } = getPricingForItem(item);
+                const hasDiscount =
+                  !!appliedOffer && (appliedOffer.discountType === "percentage" || appliedOffer.discountType === "fixed_amount");
                 return (
                   <div
                     key={item.id}
@@ -603,11 +646,17 @@ export default function CustomerMenu({
                         <h3 className="font-bold text-sm uppercase tracking-wide text-foreground truncate">
                           {item.name}
                         </h3>
-                        {itemOffer && (
+                        {appliedOffer && (
                           <Badge className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0 shrink-0">
-                            {itemOffer.discountType === "percentage" && `${itemOffer.discountValue}%`}
-                            {itemOffer.discountType === "fixed_amount" && `$${parseFloat(itemOffer.discountValue).toFixed(0)}`}
-                            {itemOffer.discountType === "bogo" && "BOGO"}
+                            {appliedOffer.discountType === "percentage" && `${appliedOffer.discountValue}%`}
+                            {appliedOffer.discountType === "fixed_amount" &&
+                              formatCurrencyTRY(appliedOffer.discountValue, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            {appliedOffer.discountType === "bogo" && "BOGO"}
+                          </Badge>
+                        )}
+                        {suggestedItemIds.has(item.id) && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+                            Recommended
                           </Badge>
                         )}
                       </div>
@@ -615,19 +664,31 @@ export default function CustomerMenu({
                       <div className="flex items-baseline gap-1 mt-0.5">
                         <div className="flex-1 border-b border-dotted border-red-300 dark:border-red-700 translate-y-[-2px]" />
                         <div className="shrink-0 font-bold text-base">
-                          {discountedPrice !== null ? (
+                          {hasDiscount ? (
                             <span className="flex items-baseline gap-1">
-                              <span className="text-red-500">{discountedPrice.toFixed(0)}</span>
-                              <span className="text-xs text-muted-foreground line-through">{originalPrice.toFixed(0)}</span>
+                              <span className="text-red-500">
+                                {formatCurrencyTRY(discountedUnitPrice, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              </span>
+                              <span className="text-xs text-muted-foreground line-through">
+                                {formatCurrencyTRY(originalUnitPrice, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              </span>
                             </span>
                           ) : (
-                            <span>{originalPrice.toFixed(0)}</span>
+                            <span>{formatCurrencyTRY(originalUnitPrice, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
                           )}
                         </div>
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
                         {item.description}
                       </p>
+                      {item.reasonLabel && suggestedItemIds.has(item.id) && (
+                        <p className="text-[11px] text-primary mt-0.5">{item.reasonLabel}</p>
+                      )}
+                      {getNutritionParts(item).length > 0 && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {getNutritionParts(item).join(" · ")}
+                        </p>
+                      )}
                       <div className="flex gap-1 mt-1 flex-wrap">
                         {item.isVegan && (
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
@@ -740,13 +801,13 @@ export default function CustomerMenu({
                             {order.items.map((item) => (
                               <div key={item.id} className="flex justify-between text-sm">
                                 <span>{item.quantity}x {item.name}</span>
-                                <span className="text-muted-foreground">${(parseFloat(item.unitPrice) * item.quantity).toFixed(2)}</span>
+                                <span className="text-muted-foreground">{formatCurrencyTRY(parseFloat(item.unitPrice) * item.quantity)}</span>
                               </div>
                             ))}
                           </div>
                           <div className="flex justify-between items-center pt-2 border-t">
                             <span className="font-semibold">Total</span>
-                            <span className="font-bold">${parseFloat(order.totalAmount).toFixed(2)}</span>
+                            <span className="font-bold">{formatCurrencyTRY(order.totalAmount)}</span>
                           </div>
                           {order.paymentStatus === "paid" && !submittedFeedbackOrders.has(order.id) && (
                             <div className="mt-3 pt-2 border-t">
@@ -805,7 +866,7 @@ export default function CustomerMenu({
                             </div>
                             <div className="flex justify-between items-center">
                               <span className="text-sm text-muted-foreground">{order.items.length} items</span>
-                              <span className="font-semibold">${parseFloat(order.totalAmount).toFixed(2)}</span>
+                              <span className="font-semibold">{formatCurrencyTRY(order.totalAmount)}</span>
                             </div>
                           </Card>
                         );
@@ -889,12 +950,11 @@ export default function CustomerMenu({
                   <img src={selectedItem.image} alt={selectedItem.name} className="w-full h-full object-cover" />
                 </div>
                 <p className="text-muted-foreground">{selectedItem.description}</p>
-                {selectedItem.calories && (
+                {getNutritionParts(selectedItem).length > 0 && (
                   <div className="flex gap-4 text-sm">
-                    <span>{selectedItem.calories} cal</span>
-                    {selectedItem.protein && <span>{selectedItem.protein}g protein</span>}
-                    {selectedItem.carbs && <span>{selectedItem.carbs}g carbs</span>}
-                    {selectedItem.fat && <span>{selectedItem.fat}g fat</span>}
+                    {getNutritionParts(selectedItem).map((part) => (
+                      <span key={part}>{part}</span>
+                    ))}
                   </div>
                 )}
                 {selectedItem.allergens && selectedItem.allergens.length > 0 && (
@@ -916,7 +976,7 @@ export default function CustomerMenu({
                           />
                           <Label htmlFor={modifier.id} className="cursor-pointer">{modifier.name}</Label>
                         </div>
-                        <span className="text-sm text-muted-foreground">+${parseFloat(modifier.price).toFixed(2)}</span>
+                        <span className="text-sm text-muted-foreground">+{formatCurrencyTRY(modifier.price)}</span>
                       </div>
                     ))}
                   </div>
@@ -933,7 +993,7 @@ export default function CustomerMenu({
               </div>
               <DialogFooter>
                 <Button className="w-full" onClick={handleAddToCart}>
-                  Add to Cart - ${calculateTotal().toFixed(2)}
+                  Add to Cart - {formatCurrencyTRY(calculateTotal())}
                 </Button>
               </DialogFooter>
             </>

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { formatCurrencyTRY } from "@/lib/currency";
 
 export interface MenuItem {
   id: string;
@@ -84,7 +85,7 @@ export default function MenuItemCard({ item, onAddToCart }: MenuItemCardProps) {
               {item.name}
             </h3>
             <span className="font-bold text-base" data-testid={`text-item-price-${item.id}`}>
-              ${item.price.toFixed(2)}
+              {formatCurrencyTRY(item.price)}
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
@@ -155,7 +156,7 @@ export default function MenuItemCard({ item, onAddToCart }: MenuItemCardProps) {
                       </Label>
                     </div>
                     <span className="text-sm text-muted-foreground">
-                      +${modifier.price.toFixed(2)}
+                      +{formatCurrencyTRY(modifier.price)}
                     </span>
                   </div>
                 ))}
@@ -189,7 +190,7 @@ export default function MenuItemCard({ item, onAddToCart }: MenuItemCardProps) {
               onClick={handleAddToCart}
               data-testid="button-add-to-cart-confirm"
             >
-              Add to Cart - ${calculateTotal().toFixed(2)}
+              Add to Cart - {formatCurrencyTRY(calculateTotal())}
             </Button>
           </DialogFooter>
         </DialogContent>

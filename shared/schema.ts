@@ -25,6 +25,11 @@ export const restaurants = pgTable("restaurants", {
   email: varchar("email", { length: 255 }),
   description: text("description"),
   logoUrl: varchar("logo_url", { length: 500 }),
+  menuThemePrimary: varchar("menu_theme_primary", { length: 20 }),
+  menuThemeAccent: varchar("menu_theme_accent", { length: 20 }),
+  menuThemeBackground: varchar("menu_theme_background", { length: 20 }),
+  menuThemeForeground: varchar("menu_theme_foreground", { length: 20 }),
+  menuThemeCard: varchar("menu_theme_card", { length: 20 }),
   ownerId: integer("owner_id"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
@@ -360,6 +365,11 @@ export const createRestaurantSchema = z.object({
   email: z.string().email().optional(),
   description: z.string().optional(),
   logoUrl: z.string().optional(),
+  menuThemePrimary: z.string().optional(),
+  menuThemeAccent: z.string().optional(),
+  menuThemeBackground: z.string().optional(),
+  menuThemeForeground: z.string().optional(),
+  menuThemeCard: z.string().optional(),
 });
 
 export const ownerStaffSignUpSchema = z.object({
