@@ -362,6 +362,144 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
+  // ============ INGREDIENTS & STOCK ============
+  app.get("/api/ingredients", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const list = await storage.getIngredients();
+      res.json(list);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/ingredients", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+      const unit = typeof req.body?.unit === "string" ? req.body.unit.trim() : "";
+      if (!name) {
+        return res.status(400).json({ error: "Ingredient name is required" });
+      }
+      const existing = await storage.getIngredientByName(name);
+      if (existing) {
+        return res.json(existing);
+      }
+      const created = await storage.createIngredient({
+        name,
+        unit: unit || null,
+      });
+      res.status(201).json(created);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to create ingredient" });
+    }
+  });
+
+  app.post("/api/ingredients/seed", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      if (items.length === 0) {
+        return res.status(400).json({ error: "No ingredients provided" });
+      }
+      const created = [];
+      for (const item of items) {
+        const name = typeof item?.name === "string" ? item.name.trim() : "";
+        const unit = typeof item?.unit === "string" ? item.unit.trim() : "";
+        if (!name) continue;
+        const existing = await storage.getIngredientByName(name);
+        if (existing) continue;
+        const row = await storage.createIngredient({
+          name,
+          unit: unit || null,
+        });
+        created.push(row);
+      }
+      res.status(201).json({ created });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to seed ingredients" });
+    }
+  });
+
+  app.get("/api/restaurants/:id/ingredient-stocks", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const restaurantId = parseInt(req.params.id);
+      const restaurant = await storage.getRestaurant(restaurantId);
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+      const stocks = await storage.getIngredientStocksByRestaurant(restaurantId);
+      res.json(stocks);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/restaurants/:id/ingredient-stocks", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const restaurantId = parseInt(req.params.id);
+      const restaurant = await storage.getRestaurant(restaurantId);
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+      const ingredientId = Number(req.body?.ingredientId);
+      if (!ingredientId || Number.isNaN(ingredientId)) {
+        return res.status(400).json({ error: "ingredientId is required" });
+      }
+      const quantityRaw = req.body?.quantity;
+      const thresholdRaw = req.body?.lowStockThreshold;
+      const quantity = quantityRaw === "" || quantityRaw == null ? null : String(quantityRaw);
+      const lowStockThreshold = thresholdRaw === "" || thresholdRaw == null ? null : String(thresholdRaw);
+      const row = await storage.upsertIngredientStock(restaurantId, ingredientId, {
+        quantity,
+        lowStockThreshold,
+      });
+      res.json(row);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update stock" });
+    }
+  });
+
+  app.put("/api/restaurants/:id/ingredient-stocks/:ingredientId", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const restaurantId = parseInt(req.params.id);
+      const restaurant = await storage.getRestaurant(restaurantId);
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+      const ingredientId = parseInt(req.params.ingredientId);
+      if (!ingredientId || Number.isNaN(ingredientId)) {
+        return res.status(400).json({ error: "ingredientId is required" });
+      }
+      const quantityRaw = req.body?.quantity;
+      const thresholdRaw = req.body?.lowStockThreshold;
+      const quantity = quantityRaw === "" || quantityRaw == null ? null : String(quantityRaw);
+      const lowStockThreshold = thresholdRaw === "" || thresholdRaw == null ? null : String(thresholdRaw);
+      const row = await storage.upsertIngredientStock(restaurantId, ingredientId, {
+        quantity,
+        lowStockThreshold,
+      });
+      res.json(row);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update stock" });
+    }
+  });
+
   app.post("/api/restaurants/:id/categories", async (req, res) => {
     try {
       const restaurantId = parseInt(req.params.id);
@@ -373,6 +511,57 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       res.status(201).json(cat);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============ MENU ITEM RECIPES ============
+  app.get("/api/menu-items/:id/recipes", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const menuItemId = parseInt(req.params.id);
+      const menuItem = await storage.getMenuItem(menuItemId);
+      if (!menuItem || !menuItem.restaurantId) {
+        return res.status(404).json({ error: "Menu item not found" });
+      }
+      const restaurant = await storage.getRestaurant(menuItem.restaurantId);
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+      const rows = await storage.getRecipesByMenuItem(menuItemId);
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/menu-items/:id/recipes", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const menuItemId = parseInt(req.params.id);
+      const menuItem = await storage.getMenuItem(menuItemId);
+      if (!menuItem || !menuItem.restaurantId) {
+        return res.status(404).json({ error: "Menu item not found" });
+      }
+      const restaurant = await storage.getRestaurant(menuItem.restaurantId);
+      if (!restaurant || restaurant.ownerId !== req.session.staffId) {
+        return res.status(403).json({ error: "You don't own this restaurant" });
+      }
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      const normalized = items
+        .map((row: any) => ({
+          ingredientId: Number(row.ingredientId),
+          quantityRequired: String(row.quantityRequired ?? "").trim(),
+        }))
+        .filter((row: any) => row.ingredientId && row.quantityRequired);
+
+      await storage.replaceRecipesForMenuItem(menuItemId, normalized);
+      res.json({ success: true, count: normalized.length });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to update recipes" });
     }
   });
 
@@ -612,7 +801,21 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   app.patch("/api/orders/:id/status", async (req, res) => {
     try {
       const data = updateOrderStatusSchema.parse(req.body);
-      const order = await storage.updateOrderStatus(parseInt(req.params.id), data.status);
+      const orderId = parseInt(req.params.id);
+      const existingOrder = await storage.getOrder(orderId);
+      if (!existingOrder) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      if (data.status === "in_progress" && !existingOrder.stockDeductedAt) {
+        try {
+          await storage.deductStockForOrder(orderId);
+        } catch (error: any) {
+          return res.status(400).json({ error: error.message || "Insufficient stock" });
+        }
+      }
+
+      const order = await storage.updateOrderStatus(orderId, data.status);
       
       if (!order) {
         return res.status(404).json({ error: "Order not found" });

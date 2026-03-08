@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, desc, sql, and, ne, gte } from "drizzle-orm";
+import { eq, desc, sql, and, ne, gte, inArray, isNull } from "drizzle-orm";
 import {
   staff,
   customers,
@@ -9,6 +9,9 @@ import {
   orderItems,
   restaurantTables,
   categories,
+  ingredients,
+  ingredientStocks,
+  recipes,
   tableCalls,
   restaurants,
   customerPreferences,
@@ -26,6 +29,9 @@ import {
   type OrderItem,
   type RestaurantTable,
   type Category,
+  type Ingredient,
+  type InsertIngredient,
+  type IngredientStock,
   type TableCall,
   type InsertTableCall,
   type Restaurant,
@@ -74,6 +80,24 @@ export interface IStorage {
   createCategory(name: string, restaurantId?: number): Promise<Category>;
   updateCategory(id: number, name: string): Promise<Category | undefined>;
   deleteCategory(id: number): Promise<boolean>;
+
+  // Ingredients & Stock
+  getIngredients(): Promise<Ingredient[]>;
+  getIngredientByName(name: string): Promise<Ingredient | undefined>;
+  createIngredient(data: InsertIngredient): Promise<Ingredient>;
+  getIngredientStocksByRestaurant(restaurantId: number): Promise<IngredientStock[]>;
+  upsertIngredientStock(
+    restaurantId: number,
+    ingredientId: number,
+    data: { quantity: string | null; lowStockThreshold: string | null },
+  ): Promise<IngredientStock>;
+
+  // Recipes (menu item ingredients)
+  getRecipesByMenuItem(menuItemId: number): Promise<{ ingredientId: number; quantityRequired: string | null }[]>;
+  replaceRecipesForMenuItem(menuItemId: number, items: { ingredientId: number; quantityRequired: string }[]): Promise<void>;
+
+  // Stock deduction
+  deductStockForOrder(orderId: number): Promise<void>;
 
   // Tables
   getTables(restaurantId?: number): Promise<RestaurantTable[]>;
@@ -253,6 +277,159 @@ export class DatabaseStorage implements IStorage {
     await db.update(menuItems).set({ categoryId: null }).where(eq(menuItems.categoryId, id));
     await db.delete(categories).where(eq(categories.id, id));
     return true;
+  }
+
+  // Ingredients & Stock
+  async getIngredients(): Promise<Ingredient[]> {
+    return db.select().from(ingredients).orderBy(ingredients.name);
+  }
+
+  async getIngredientByName(name: string): Promise<Ingredient | undefined> {
+    const normalized = name.trim().toLowerCase();
+    const [ingredient] = await db
+      .select()
+      .from(ingredients)
+      .where(sql`lower(${ingredients.name}) = ${normalized}`);
+    return ingredient;
+  }
+
+  async createIngredient(data: InsertIngredient): Promise<Ingredient> {
+    const [created] = await db.insert(ingredients).values(data).returning();
+    return created;
+  }
+
+  async getIngredientStocksByRestaurant(restaurantId: number): Promise<IngredientStock[]> {
+    return db.select().from(ingredientStocks).where(eq(ingredientStocks.restaurantId, restaurantId));
+  }
+
+  async upsertIngredientStock(
+    restaurantId: number,
+    ingredientId: number,
+    data: { quantity: string | null; lowStockThreshold: string | null },
+  ): Promise<IngredientStock> {
+    const [row] = await db
+      .insert(ingredientStocks)
+      .values({
+        restaurantId,
+        ingredientId,
+        quantity: data.quantity,
+        lowStockThreshold: data.lowStockThreshold,
+      })
+      .onConflictDoUpdate({
+        target: [ingredientStocks.restaurantId, ingredientStocks.ingredientId],
+        set: {
+          quantity: data.quantity,
+          lowStockThreshold: data.lowStockThreshold,
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  // Recipes (menu item ingredients)
+  async getRecipesByMenuItem(menuItemId: number): Promise<{ ingredientId: number; quantityRequired: string | null }[]> {
+    const rows = await db
+      .select({
+        ingredientId: recipes.ingredientId,
+        quantityRequired: recipes.quantityRequired,
+      })
+      .from(recipes)
+      .where(eq(recipes.menuItemId, menuItemId));
+    return rows;
+  }
+
+  async replaceRecipesForMenuItem(
+    menuItemId: number,
+    items: { ingredientId: number; quantityRequired: string }[],
+  ): Promise<void> {
+    await db.delete(recipes).where(eq(recipes.menuItemId, menuItemId));
+    if (items.length === 0) return;
+    await db.insert(recipes).values(
+      items.map((item) => ({
+        menuItemId,
+        ingredientId: item.ingredientId,
+        quantityRequired: item.quantityRequired,
+      }))
+    );
+  }
+
+  async deductStockForOrder(orderId: number): Promise<void> {
+    await db.transaction(async (tx) => {
+      const [order] = await tx.select().from(orderTickets).where(eq(orderTickets.id, orderId));
+      if (!order) {
+        throw new Error("Order not found");
+      }
+      if (order.stockDeductedAt) {
+        return;
+      }
+
+      const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+      if (items.length === 0) {
+        await tx.update(orderTickets)
+          .set({ stockDeductedAt: new Date() })
+          .where(and(eq(orderTickets.id, orderId), isNull(orderTickets.stockDeductedAt)));
+        return;
+      }
+
+      const menuItemIds = Array.from(new Set(items.map((item) => item.menuItemId)));
+      const recipeRows = menuItemIds.length > 0
+        ? await tx.select().from(recipes).where(inArray(recipes.menuItemId, menuItemIds))
+        : [];
+
+      if (recipeRows.length === 0) {
+        await tx.update(orderTickets)
+          .set({ stockDeductedAt: new Date() })
+          .where(and(eq(orderTickets.id, orderId), isNull(orderTickets.stockDeductedAt)));
+        return;
+      }
+
+      const recipesByMenuItem = new Map<number, typeof recipeRows>();
+      for (const row of recipeRows) {
+        const list = recipesByMenuItem.get(row.menuItemId) ?? [];
+        list.push(row);
+        recipesByMenuItem.set(row.menuItemId, list);
+      }
+
+      const requiredByIngredient = new Map<number, number>();
+      for (const item of items) {
+        const rows = recipesByMenuItem.get(item.menuItemId) ?? [];
+        for (const row of rows) {
+          const baseQty = row.quantityRequired ? Number(row.quantityRequired) : 0;
+          if (!baseQty || Number.isNaN(baseQty)) continue;
+          const totalQty = baseQty * item.quantity;
+          if (totalQty <= 0) continue;
+          requiredByIngredient.set(
+            row.ingredientId,
+            (requiredByIngredient.get(row.ingredientId) ?? 0) + totalQty
+          );
+        }
+      }
+
+      for (const [ingredientId, neededQty] of requiredByIngredient.entries()) {
+        const needed = Number(neededQty.toFixed(2));
+        const [updated] = await tx.update(ingredientStocks)
+          .set({ quantity: sql`${ingredientStocks.quantity} - ${needed}` })
+          .where(and(
+            eq(ingredientStocks.restaurantId, order.restaurantId),
+            eq(ingredientStocks.ingredientId, ingredientId),
+            sql`${ingredientStocks.quantity} >= ${needed}`
+          ))
+          .returning();
+
+        if (!updated) {
+          throw new Error(`Insufficient stock for ingredient ${ingredientId}`);
+        }
+      }
+
+      const [marked] = await tx.update(orderTickets)
+        .set({ stockDeductedAt: new Date() })
+        .where(and(eq(orderTickets.id, orderId), isNull(orderTickets.stockDeductedAt)))
+        .returning();
+
+      if (!marked) {
+        throw new Error("Stock already deducted for this order");
+      }
+    });
   }
 
   // Tables

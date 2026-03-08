@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import StaffSidebar from "@/components/layout/StaffSidebar";
@@ -28,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare, X, Check, Tag, Upload, ImagePlus, Palette } from "lucide-react";
+import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare, X, Check, Tag, Upload, ImagePlus, Palette, ClipboardList } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrencyTRY } from "@/lib/currency";
 import { useToast } from "@/hooks/use-toast";
@@ -86,6 +86,25 @@ interface MenuItem {
   isSpicy: boolean | null;
   categoryId: number | null;
   restaurantId: number | null;
+}
+
+interface Ingredient {
+  id: number;
+  name: string;
+  unit: string | null;
+}
+
+interface IngredientStock {
+  id: number;
+  restaurantId: number;
+  ingredientId: number;
+  quantity: string | null;
+  lowStockThreshold: string | null;
+}
+
+interface MenuIngredientRow {
+  ingredientId: string;
+  quantityRequired: string;
 }
 
 interface Category {
@@ -165,7 +184,7 @@ interface FeedbackSummary {
 interface OwnerDashboardProps {
   userName?: string;
   onLogout: () => void;
-  initialTab?: "analytics" | "staff" | "menu" | "feedback";
+  initialTab?: "analytics" | "staff" | "menu" | "stock" | "feedback";
 }
 
 const DEFAULT_THEME = {
@@ -175,6 +194,24 @@ const DEFAULT_THEME = {
   foreground: "#1a1a1a",
   card: "#fcfcfc",
 };
+
+const BASIC_INGREDIENTS: Array<{ name: string; unit: string }> = [
+  { name: "Tomato", unit: "piece" },
+  { name: "Onion", unit: "piece" },
+  { name: "Lettuce", unit: "piece" },
+  { name: "Potato", unit: "piece" },
+  { name: "Chicken", unit: "kg" },
+  { name: "Beef", unit: "kg" },
+  { name: "Cheese", unit: "kg" },
+  { name: "Milk", unit: "liter" },
+  { name: "Rice", unit: "kg" },
+  { name: "Pasta", unit: "kg" },
+  { name: "Bread", unit: "piece" },
+  { name: "Egg", unit: "piece" },
+  { name: "Oil", unit: "liter" },
+];
+
+const INGREDIENT_UNITS = ["kg", "gram", "liter", "piece"];
 
 function mapThemeToForm(theme: Partial<RestaurantTheme> | Partial<Restaurant>): ThemeFormState {
   return {
@@ -187,7 +224,7 @@ function mapThemeToForm(theme: Partial<RestaurantTheme> | Partial<Restaurant>): 
 }
 
 export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout, initialTab = "analytics" }: OwnerDashboardProps) {
-  const [activeTab, setActiveTab] = useState<"analytics" | "staff" | "menu" | "feedback">(initialTab);
+  const [activeTab, setActiveTab] = useState<"analytics" | "staff" | "menu" | "stock" | "feedback">(initialTab);
   const [isMenuDialogOpen, setIsMenuDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [stableRestaurantId, setStableRestaurantId] = useState<number | null>(null);
@@ -211,6 +248,11 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
+  const [newIngredientName, setNewIngredientName] = useState("");
+  const [newIngredientUnit, setNewIngredientUnit] = useState("");
+  const [stockEdits, setStockEdits] = useState<Record<number, { quantity: string; lowStockThreshold: string }>>({});
+  const [menuIngredients, setMenuIngredients] = useState<MenuIngredientRow[]>([]);
+  const [hasAutoSeededIngredients, setHasAutoSeededIngredients] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -284,8 +326,40 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     enabled: activeTab === "menu" && !!restaurantId,
   });
 
+  const { data: ingredients = [], isLoading: ingredientsLoading } = useQuery<Ingredient[]>({
+    queryKey: ["/api/ingredients"],
+    enabled: activeTab === "stock",
+  });
+
+  const { data: ingredientStocks = [], isLoading: stocksLoading } = useQuery<IngredientStock[]>({
+    queryKey: ["/api/restaurants", restaurantId, "ingredient-stocks"],
+    enabled: activeTab === "stock" && !!restaurantId,
+  });
+
+  const { data: menuIngredientsCatalog = [], isLoading: menuIngredientsLoading } = useQuery<Ingredient[]>({
+    queryKey: ["/api/ingredients"],
+    enabled: isMenuDialogOpen && activeTab === "menu",
+  });
+
+  const { data: menuItemRecipes = [], isLoading: recipesLoading } = useQuery<Array<{ ingredientId: number; quantityRequired: string | null }>>({
+    queryKey: ["/api/menu-items", editingItem?.id, "recipes"],
+    enabled: isMenuDialogOpen && !!editingItem?.id,
+  });
+
   const menuItems = menuData?.items || [];
   const menuCategories = menuData?.categories || [];
+  const stockByIngredientId = new Map(ingredientStocks.map((row) => [row.ingredientId, row]));
+  const ingredientUnitById = new Map(menuIngredientsCatalog.map((ing) => [String(ing.id), ing.unit]));
+  const uniqueIngredients = useMemo(() => {
+    const map = new Map<string, Ingredient>();
+    for (const ing of ingredients) {
+      const key = ing.name.trim().toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, ing);
+      }
+    }
+    return Array.from(map.values());
+  }, [ingredients]);
   const hasCustomTheme =
     !!restaurantTheme?.menuThemePrimary ||
     !!restaurantTheme?.menuThemeAccent ||
@@ -308,6 +382,21 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     setThemeForm(mapThemeToForm(restaurantTheme));
     setIsThemeHydrated(true);
   }, [restaurantTheme]);
+
+
+  useEffect(() => {
+    if (!isMenuDialogOpen) return;
+    if (editingItem) {
+      setMenuIngredients(
+        (menuItemRecipes || []).map((row) => ({
+          ingredientId: String(row.ingredientId),
+          quantityRequired: row.quantityRequired ? String(row.quantityRequired) : "",
+        }))
+      );
+    } else {
+      setMenuIngredients([]);
+    }
+  }, [isMenuDialogOpen, editingItem, menuItemRecipes]);
 
   const filteredMenuItems = selectedCategoryFilter === "all"
     ? menuItems
@@ -336,8 +425,16 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   });
 
   const createMenuMutation = useMutation({
-    mutationFn: async ({ data, restId }: { data: typeof menuForm; restId: number }) => {
-      return apiRequest("POST", `/api/restaurants/${restId}/menu`, {
+    mutationFn: async ({
+      data,
+      restId,
+      ingredients,
+    }: {
+      data: typeof menuForm;
+      restId: number;
+      ingredients: MenuIngredientRow[];
+    }) => {
+      const res = await apiRequest("POST", `/api/restaurants/${restId}/menu`, {
         name: data.name,
         description: data.description || null,
         price: data.price,
@@ -353,6 +450,17 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         isSpicy: data.isSpicy,
         isSoldOut: data.isSoldOut,
       });
+      const created = await res.json();
+      const normalized = ingredients
+        .filter((row) => row.ingredientId && row.quantityRequired)
+        .map((row) => ({
+          ingredientId: Number(row.ingredientId),
+          quantityRequired: String(row.quantityRequired),
+        }));
+      if (normalized.length > 0) {
+        await apiRequest("PUT", `/api/menu-items/${created.id}/recipes`, { items: normalized });
+      }
+      return created;
     },
     onSuccess: (_, { restId }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
@@ -366,8 +474,18 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   });
 
   const updateMenuMutation = useMutation({
-    mutationFn: async ({ id, data, restId }: { id: number; data: typeof menuForm; restId: number }) => {
-      return apiRequest("PUT", `/api/restaurants/${restId}/menu/${id}`, {
+    mutationFn: async ({
+      id,
+      data,
+      restId,
+      ingredients,
+    }: {
+      id: number;
+      data: typeof menuForm;
+      restId: number;
+      ingredients: MenuIngredientRow[];
+    }) => {
+      const res = await apiRequest("PUT", `/api/restaurants/${restId}/menu/${id}`, {
         name: data.name,
         description: data.description || null,
         price: data.price,
@@ -383,6 +501,15 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         isSpicy: data.isSpicy,
         isSoldOut: data.isSoldOut,
       });
+      const updated = await res.json();
+      const normalized = ingredients
+        .filter((row) => row.ingredientId && row.quantityRequired)
+        .map((row) => ({
+          ingredientId: Number(row.ingredientId),
+          quantityRequired: String(row.quantityRequired),
+        }));
+      await apiRequest("PUT", `/api/menu-items/${id}/recipes`, { items: normalized });
+      return updated;
     },
     onSuccess: (_, { restId }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
@@ -507,6 +634,71 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     onSuccess: (_, { restId }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "offers"] });
       toast({ title: "Offer Deleted", description: "Special offer has been removed." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const addIngredientMutation = useMutation({
+    mutationFn: async ({ name, unit }: { name: string; unit: string }) => {
+      return apiRequest("POST", "/api/ingredients", { name, unit });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/ingredients"] });
+      setNewIngredientName("");
+      setNewIngredientUnit("");
+      toast({ title: "Ingredient Added", description: "New ingredient has been added to the catalog." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const seedIngredientsMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/ingredients/seed", { items: BASIC_INGREDIENTS });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/ingredients"] });
+      setHasAutoSeededIngredients(true);
+      toast({ title: "Ingredients Added", description: "Basic ingredient list has been added." });
+    },
+    onError: (error: Error) => {
+      setHasAutoSeededIngredients(false);
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  useEffect(() => {
+    if (activeTab !== "stock" || ingredientsLoading || hasAutoSeededIngredients) {
+      return;
+    }
+    if (ingredients.length === 0) {
+      seedIngredientsMutation.mutate();
+    }
+  }, [activeTab, ingredients.length, ingredientsLoading, hasAutoSeededIngredients, seedIngredientsMutation]);
+
+  const upsertStockMutation = useMutation({
+    mutationFn: async ({
+      ingredientId,
+      quantity,
+      lowStockThreshold,
+    }: {
+      ingredientId: number;
+      quantity: string;
+      lowStockThreshold: string;
+    }) => {
+      if (!restaurantId) throw new Error("Restaurant not loaded");
+      return apiRequest("POST", `/api/restaurants/${restaurantId}/ingredient-stocks`, {
+        ingredientId,
+        quantity,
+        lowStockThreshold,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restaurantId, "ingredient-stocks"] });
+      toast({ title: "Stock Updated", description: "Ingredient stock has been updated." });
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -687,6 +879,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const openCreateDialog = () => {
     setEditingItem(null);
     resetMenuForm();
+    setMenuIngredients([]);
     setIsMenuDialogOpen(true);
   };
 
@@ -722,10 +915,54 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
       return;
     }
     if (editingItem) {
-      updateMenuMutation.mutate({ id: editingItem.id, data: menuForm, restId: restaurantId });
+      updateMenuMutation.mutate({ id: editingItem.id, data: menuForm, restId: restaurantId, ingredients: menuIngredients });
     } else {
-      createMenuMutation.mutate({ data: menuForm, restId: restaurantId });
+      createMenuMutation.mutate({ data: menuForm, restId: restaurantId, ingredients: menuIngredients });
     }
+  };
+
+  const addIngredientRow = () => {
+    setMenuIngredients((prev) => [...prev, { ingredientId: "", quantityRequired: "" }]);
+  };
+
+  const updateIngredientRow = (index: number, updates: Partial<MenuIngredientRow>) => {
+    setMenuIngredients((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, ...updates } : row))
+    );
+  };
+
+  const removeIngredientRow = (index: number) => {
+    setMenuIngredients((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateStockEdit = (ingredientId: number, field: "quantity" | "lowStockThreshold", value: string) => {
+    setStockEdits((prev) => ({
+      ...prev,
+      [ingredientId]: {
+        quantity: prev[ingredientId]?.quantity ?? "",
+        lowStockThreshold: prev[ingredientId]?.lowStockThreshold ?? "",
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleStockSave = (ingredientId: number) => {
+    const stock = stockByIngredientId.get(ingredientId);
+    const edit = stockEdits[ingredientId];
+    const quantity = edit?.quantity ?? stock?.quantity ?? "";
+    const lowStockThreshold = edit?.lowStockThreshold ?? stock?.lowStockThreshold ?? "";
+    upsertStockMutation.mutate({ ingredientId, quantity, lowStockThreshold });
+  };
+
+  const handleAddIngredient = () => {
+    if (!newIngredientName.trim()) {
+      toast({ title: "Error", description: "Ingredient name is required", variant: "destructive" });
+      return;
+    }
+    addIngredientMutation.mutate({
+      name: newIngredientName.trim(),
+      unit: newIngredientUnit.trim(),
+    });
   };
 
   const isLoading = summaryLoading || topSellingLoading || salesLoading;
@@ -806,7 +1043,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
             <ThemeToggle />
           </header>
           <main className="flex-1 overflow-auto p-4">
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "analytics" | "staff" | "menu" | "feedback")}>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "analytics" | "staff" | "menu" | "stock" | "feedback")}>
               <TabsList className="mb-6">
                 <TabsTrigger value="analytics" data-testid="tab-analytics">Analytics</TabsTrigger>
                 <TabsTrigger value="staff" data-testid="tab-staff">
@@ -817,6 +1054,9 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                 </TabsTrigger>
                 <TabsTrigger value="menu" data-testid="tab-menu">
                   Menu Management
+                </TabsTrigger>
+                <TabsTrigger value="stock" data-testid="tab-stock">
+                  Stock Management
                 </TabsTrigger>
                 <TabsTrigger value="feedback" data-testid="tab-feedback">
                   Feedback
@@ -1392,6 +1632,125 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                 )}
               </TabsContent>
 
+              <TabsContent value="stock" className="space-y-6 mt-0">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <ClipboardList className="w-4 h-4" />
+                      Stock Management
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {ingredientsLoading || stocksLoading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : uniqueIngredients.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">
+                        Ingredients are not available yet.
+                        <div className="mt-3 flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => seedIngredientsMutation.mutate()}
+                            disabled={seedIngredientsMutation.isPending}
+                          >
+                            {seedIngredientsMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                            Seed Basic List
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/ingredients"] })}
+                          >
+                            Refresh
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-12 text-xs font-semibold text-muted-foreground px-2">
+                          <div className="col-span-5">Ingredient</div>
+                          <div className="col-span-2">Unit</div>
+                          <div className="col-span-3">Current Quantity</div>
+                          <div className="col-span-2 text-right">Action</div>
+                        </div>
+                        {uniqueIngredients.map((ingredient) => {
+                          const stock = stockByIngredientId.get(ingredient.id);
+                          const edit = stockEdits[ingredient.id];
+                          const quantityValue = edit?.quantity ?? stock?.quantity ?? "";
+                          return (
+                            <div key={ingredient.id} className="grid grid-cols-12 gap-2 items-center border rounded-lg p-2">
+                              <div className="col-span-5 font-medium">{ingredient.name}</div>
+                              <div className="col-span-2 text-sm text-muted-foreground">{ingredient.unit || "-"}</div>
+                              <div className="col-span-3">
+                                <Input
+                                  value={quantityValue}
+                                  onChange={(e) => updateStockEdit(ingredient.id, "quantity", e.target.value)}
+                                  placeholder="0"
+                                />
+                              </div>
+                              <div className="col-span-2 flex justify-end">
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleStockSave(ingredient.id)}
+                                  disabled={upsertStockMutation.isPending}
+                                >
+                                  Save
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Tag className="w-4 h-4" />
+                      Add New Ingredient (Optional)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="ingredient-name">Ingredient Name</Label>
+                        <Input
+                          id="ingredient-name"
+                          value={newIngredientName}
+                          onChange={(e) => setNewIngredientName(e.target.value)}
+                          placeholder="e.g. Tomato"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="ingredient-unit">Unit</Label>
+                        <Select value={newIngredientUnit} onValueChange={setNewIngredientUnit}>
+                          <SelectTrigger id="ingredient-unit">
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {INGREDIENT_UNITS.map((unit) => (
+                              <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-end gap-2">
+                        <Button onClick={handleAddIngredient} disabled={addIngredientMutation.isPending}>
+                          {addIngredientMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                          Add Ingredient
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Default ingredients are auto-seeded. Add new ingredients here only if needed.
+                    </p>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
               <TabsContent value="feedback" className="space-y-6 mt-0">
                 {feedbackLoading ? (
                   <div className="flex items-center justify-center py-12">
@@ -1566,6 +1925,70 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                 placeholder="Describe this dish..."
                 data-testid="input-menu-description"
               />
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Ingredients</Label>
+                <Button type="button" size="sm" variant="outline" onClick={addIngredientRow} disabled={menuIngredientsLoading}>
+                  <Plus className="w-4 h-4 mr-1" />
+                  Add Ingredient
+                </Button>
+              </div>
+              {menuIngredientsLoading || recipesLoading ? (
+                <div className="text-sm text-muted-foreground">Loading ingredients…</div>
+              ) : menuIngredientsCatalog.length === 0 ? (
+                <div className="text-sm text-muted-foreground">
+                  No ingredients available. Add ingredients in Stock Management first.
+                </div>
+              ) : menuIngredients.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No ingredients added yet.</div>
+              ) : (
+                <div className="space-y-2">
+                  {menuIngredients.map((row, index) => (
+                    <div key={`${row.ingredientId}-${index}`} className="grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-6">
+                        <Select
+                          value={row.ingredientId}
+                          onValueChange={(value) => updateIngredientRow(index, { ingredientId: value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select ingredient" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {uniqueIngredients.map((ingredient) => (
+                              <SelectItem key={ingredient.id} value={String(ingredient.id)}>
+                                {ingredient.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-3">
+                        <Input
+                          value={row.quantityRequired}
+                          onChange={(e) => updateIngredientRow(index, { quantityRequired: e.target.value })}
+                          placeholder="0"
+                          type="number"
+                          step="0.01"
+                        />
+                      </div>
+                      <div className="col-span-2 text-sm text-muted-foreground">
+                        {row.ingredientId ? ingredientUnitById.get(row.ingredientId) || "-" : "-"}
+                      </div>
+                      <div className="col-span-1 flex justify-end">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => removeIngredientRow(index)}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Image</Label>

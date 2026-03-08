@@ -61,6 +61,16 @@ export const ingredients = pgTable("ingredients", {
   lowStockThreshold: integer("low_stock_threshold"),
 });
 
+export const ingredientStocks = pgTable("ingredient_stocks", {
+  id: serial("id").primaryKey(),
+  restaurantId: integer("restaurant_id").notNull().references(() => restaurants.id, { onDelete: "cascade" }),
+  ingredientId: integer("ingredient_id").notNull().references(() => ingredients.id, { onDelete: "cascade" }),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }),
+  lowStockThreshold: decimal("low_stock_threshold", { precision: 10, scale: 2 }),
+}, (table) => ({
+  restaurantIngredientUnique: sql`unique (${table.restaurantId}, ${table.ingredientId})`,
+}));
+
 export const restaurantTables = pgTable("restaurant_tables", {
   id: serial("id").primaryKey(),
   restaurantId: integer("restaurant_id").notNull().references(() => restaurants.id, { onDelete: "cascade" }),
@@ -204,6 +214,7 @@ export const orderTickets = pgTable("order_tickets", {
   paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
+  stockDeductedAt: timestamp("stock_deducted_at"),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
 });
 
@@ -267,7 +278,7 @@ export const insertMenuItemSchema = createInsertSchema(menuItems).omit({ id: tru
 export const insertModifierSchema = createInsertSchema(modifiers).omit({ id: true });
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true });
 export const insertRestaurantTableSchema = createInsertSchema(restaurantTables).omit({ id: true });
-export const insertOrderTicketSchema = createInsertSchema(orderTickets).omit({ id: true, createdAt: true, completedAt: true });
+export const insertOrderTicketSchema = createInsertSchema(orderTickets).omit({ id: true, createdAt: true, completedAt: true, stockDeductedAt: true });
 export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true });
 export const insertTableCallSchema = createInsertSchema(tableCalls).omit({ id: true, createdAt: true, acknowledgedAt: true, resolvedAt: true });
 export const insertRestaurantSchema = createInsertSchema(restaurants).omit({ id: true, createdAt: true });
@@ -288,6 +299,11 @@ export type MenuItem = typeof menuItems.$inferSelect;
 
 export type InsertModifier = z.infer<typeof insertModifierSchema>;
 export type Modifier = typeof modifiers.$inferSelect;
+
+export type Ingredient = typeof ingredients.$inferSelect;
+export type InsertIngredient = typeof ingredients.$inferInsert;
+export type IngredientStock = typeof ingredientStocks.$inferSelect;
+export type InsertIngredientStock = typeof ingredientStocks.$inferInsert;
 
 export type Category = typeof categories.$inferSelect;
 export type RestaurantTable = typeof restaurantTables.$inferSelect;
