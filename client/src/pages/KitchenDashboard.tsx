@@ -11,6 +11,7 @@ import { Clock, Check, ChefHat, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useStaffEvents } from "@/lib/useStaffEvents";
 
 type OrderStatus = "new" | "in_progress" | "ready" | "delivered";
 
@@ -64,7 +65,15 @@ export default function KitchenDashboard({ userName = "Kitchen Staff", onLogout 
 
   const { data: orders = [], isLoading } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
-    refetchInterval: 5000,
+    refetchInterval: 25000,
+  });
+
+  useStaffEvents({
+    onEvent: (event) => {
+      if (event.type === "orders.updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      }
+    },
   });
 
   const updateStatusMutation = useMutation({

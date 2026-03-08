@@ -11,6 +11,7 @@ import { Clock, Check, Loader2, Bell, CreditCard, DollarSign, CheckCircle } from
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useStaffEvents } from "@/lib/useStaffEvents";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type OrderStatus = "new" | "in_progress" | "ready" | "delivered";
@@ -73,12 +74,23 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
 
   const { data: orders = [], isLoading } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
-    refetchInterval: 5000,
+    refetchInterval: 25000,
   });
 
   const { data: tableCalls = [], isLoading: isLoadingCalls } = useQuery<TableCall[]>({
     queryKey: ["/api/table-calls"],
-    refetchInterval: 3000,
+    refetchInterval: 25000,
+  });
+
+  useStaffEvents({
+    onEvent: (event) => {
+      if (event.type === "orders.updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      }
+      if (event.type === "table_calls.updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/table-calls"] });
+      }
+    },
   });
 
   const updateStatusMutation = useMutation({

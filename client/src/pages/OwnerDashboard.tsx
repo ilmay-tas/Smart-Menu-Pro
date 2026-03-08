@@ -31,6 +31,7 @@ import {
 import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare, X, Check, Tag, Upload, ImagePlus, Palette, ClipboardList } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrencyTRY } from "@/lib/currency";
+import { useStaffEvents } from "@/lib/useStaffEvents";
 import { useToast } from "@/hooks/use-toast";
 
 interface AnalyticsSummary {
@@ -286,19 +287,23 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
 
   const { data: summary, isLoading: summaryLoading } = useQuery<AnalyticsSummary>({
     queryKey: ["/api/analytics/summary"],
+    refetchInterval: 30000,
   });
 
   const { data: topSelling = [], isLoading: topSellingLoading } = useQuery<TopSellingItem[]>({
     queryKey: ["/api/analytics/top-selling"],
+    refetchInterval: 30000,
   });
 
   const { data: salesData = [], isLoading: salesLoading } = useQuery<SalesDataPoint[]>({
     queryKey: ["/api/analytics/daily-revenue"],
+    refetchInterval: 30000,
   });
 
   const { data: staffAssignments = [], isLoading: staffLoading } = useQuery<StaffAssignment[]>({
     queryKey: ["/api/restaurants", restaurantId, "staff"],
     enabled: activeTab === "staff" && !!restaurantId,
+    refetchInterval: activeTab === "staff" ? 30000 : false,
   });
 
   const { data: feedbackData, isLoading: feedbackLoading } = useQuery<FeedbackSummary>({
@@ -309,6 +314,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const { data: menuData, isLoading: menuLoading } = useQuery<{ items: MenuItem[]; categories: Category[] }>({
     queryKey: ["/api/restaurants", restaurantId, "menu"],
     enabled: activeTab === "menu" && !!restaurantId,
+    refetchInterval: activeTab === "menu" ? 30000 : false,
   });
 
   const themeQueryKey = ["/api/restaurants", restaurantId, "theme"] as const;
@@ -319,11 +325,13 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   } = useQuery<RestaurantTheme | null>({
     queryKey: themeQueryKey,
     enabled: !!restaurantId,
+    refetchInterval: 30000,
   });
 
   const { data: offersData = [], isLoading: offersLoading } = useQuery<SpecialOffer[]>({
     queryKey: ["/api/restaurants", restaurantId, "offers"],
     enabled: activeTab === "menu" && !!restaurantId,
+    refetchInterval: activeTab === "menu" ? 30000 : false,
   });
 
   const { data: ingredients = [], isLoading: ingredientsLoading } = useQuery<Ingredient[]>({
@@ -348,6 +356,38 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
 
   const menuItems = menuData?.items || [];
   const menuCategories = menuData?.categories || [];
+  useStaffEvents({
+    enabled: !!restaurantId,
+    onEvent: (event) => {
+      if (!restaurantId || event.restaurantId !== restaurantId) {
+        return;
+      }
+
+      if (event.type === "orders.updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/analytics/summary"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/analytics/top-selling"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/analytics/daily-revenue"] });
+      }
+
+      if (event.type === "menu.updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restaurantId, "menu"] });
+      }
+
+      if (event.type === "offers.updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restaurantId, "offers"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restaurantId, "menu"] });
+      }
+
+      if (event.type === "staff.updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restaurantId, "staff"] });
+      }
+
+      if (event.type === "theme.updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restaurantId, "theme"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/theme/current"] });
+      }
+    },
+  });
   const stockByIngredientId = new Map(ingredientStocks.map((row) => [row.ingredientId, row]));
   const ingredientUnitById = new Map(menuIngredientsCatalog.map((ing) => [String(ing.id), ing.unit]));
   const uniqueIngredients = useMemo(() => {

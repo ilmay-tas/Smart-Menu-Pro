@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import session from "express-session";
 import bcrypt from "bcryptjs";
@@ -102,6 +102,102 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   const parsePersonalizedFlag = (req: Request): boolean =>
     req.query.personalized === "true";
 
+  type StaffEventType =
+    | "orders.updated"
+    | "table_calls.updated"
+    | "menu.updated"
+    | "offers.updated"
+    | "staff.updated"
+    | "theme.updated";
+
+  interface StaffSseClient {
+    id: number;
+    role: string;
+    res: Response;
+  }
+
+  interface StaffStreamEvent {
+    type: StaffEventType;
+    restaurantId: number;
+    source?: string;
+    timestamp: string;
+  }
+
+  let nextSseClientId = 1;
+  const sseClientsByRestaurant = new Map<number, Set<StaffSseClient>>();
+
+  const removeSseClient = (restaurantId: number, clientId: number) => {
+    const clients = sseClientsByRestaurant.get(restaurantId);
+    if (!clients) {
+      return;
+    }
+    for (const client of Array.from(clients)) {
+      if (client.id === clientId) {
+        clients.delete(client);
+        break;
+      }
+    }
+    if (clients.size === 0) {
+      sseClientsByRestaurant.delete(restaurantId);
+    }
+  };
+
+  const publishStaffEvent = (
+    restaurantId: number,
+    type: StaffEventType,
+    options: { source?: string; targetRoles?: string[] } = {},
+  ) => {
+    const clients = sseClientsByRestaurant.get(restaurantId);
+    if (!clients || clients.size === 0) {
+      return;
+    }
+
+    const payload: StaffStreamEvent = {
+      type,
+      restaurantId,
+      source: options.source,
+      timestamp: new Date().toISOString(),
+    };
+    const serialized = `event: staff-event\ndata: ${JSON.stringify(payload)}\n\n`;
+    const allowedRoles = options.targetRoles ? new Set(options.targetRoles) : null;
+
+    for (const client of Array.from(clients)) {
+      if (allowedRoles && !allowedRoles.has(client.role)) {
+        continue;
+      }
+      try {
+        client.res.write(serialized);
+      } catch {
+        removeSseClient(restaurantId, client.id);
+      }
+    }
+  };
+
+  const resolveStaffRestaurantId = async (req: Request): Promise<number | null> => {
+    if (req.session.restaurantId) {
+      return req.session.restaurantId;
+    }
+    if (req.session.userType !== "staff" || !req.session.staffId) {
+      return null;
+    }
+
+    if (req.session.staffRole === "owner") {
+      const ownedRestaurant = await storage.getRestaurantByOwnerId(req.session.staffId);
+      if (!ownedRestaurant) {
+        return null;
+      }
+      req.session.restaurantId = ownedRestaurant.id;
+      return ownedRestaurant.id;
+    }
+
+    const assignment = await storage.getApprovedAssignmentForStaff(req.session.staffId);
+    if (!assignment) {
+      return null;
+    }
+    req.session.restaurantId = assignment.restaurantId;
+    return assignment.restaurantId;
+  };
+
   const buildCustomerMenuResponse = async (
     items: Awaited<ReturnType<typeof storage.getMenuItems>>,
     categoryMap: Record<number, string>,
@@ -152,6 +248,53 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }),
     );
   };
+
+  // ============ STAFF EVENTS (SSE) ============
+  app.get("/api/events/stream", async (req, res) => {
+    if (req.session.userType !== "staff" || !req.session.staffId) {
+      return res.status(401).json({ error: "Staff authentication required" });
+    }
+
+    const restaurantId = await resolveStaffRestaurantId(req);
+    if (!restaurantId) {
+      return res.status(400).json({ error: "Restaurant context is required for event stream" });
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+
+    const clientId = nextSseClientId++;
+    const role = req.session.staffRole || "staff";
+    const client: StaffSseClient = { id: clientId, role, res };
+    const existingClients = sseClientsByRestaurant.get(restaurantId) ?? new Set<StaffSseClient>();
+    existingClients.add(client);
+    sseClientsByRestaurant.set(restaurantId, existingClients);
+
+    const connectedPayload = {
+      type: "connected",
+      restaurantId,
+      role,
+      timestamp: new Date().toISOString(),
+    };
+    res.write(`event: connected\ndata: ${JSON.stringify(connectedPayload)}\n\n`);
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`: keepalive ${Date.now()}\n\n`);
+      } catch {
+        clearInterval(heartbeat);
+        removeSseClient(restaurantId, clientId);
+      }
+    }, 25000);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      removeSseClient(restaurantId, clientId);
+    });
+  });
 
   // ============ STAFF AUTH ============
   app.post("/api/staff/signup", async (req, res) => {
@@ -508,6 +651,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(400).json({ error: "Category name is required" });
       }
       const cat = await storage.createCategory(name.trim(), restaurantId);
+      publishStaffEvent(restaurantId, "menu.updated", { source: "categories.create" });
       res.status(201).json(cat);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -559,6 +703,9 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         .filter((row: any) => row.ingredientId && row.quantityRequired);
 
       await storage.replaceRecipesForMenuItem(menuItemId, normalized);
+      if (menuItem.restaurantId) {
+        publishStaffEvent(menuItem.restaurantId, "menu.updated", { source: "menu.recipes.update" });
+      }
       res.json({ success: true, count: normalized.length });
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Failed to update recipes" });
@@ -576,6 +723,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       if (!updated) {
         return res.status(404).json({ error: "Category not found" });
       }
+      const restaurantId = parseInt(req.params.id);
+      if (!Number.isNaN(restaurantId)) {
+        publishStaffEvent(restaurantId, "menu.updated", { source: "categories.update" });
+      }
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -586,6 +737,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     try {
       const catId = parseInt(req.params.catId);
       await storage.deleteCategory(catId);
+      const restaurantId = parseInt(req.params.id);
+      if (!Number.isNaN(restaurantId)) {
+        publishStaffEvent(restaurantId, "menu.updated", { source: "categories.delete" });
+      }
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -649,6 +804,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         startDate: startDate ? new Date(startDate) : null,
         endDate: endDate ? new Date(endDate) : null,
       });
+      publishStaffEvent(restaurantId, "offers.updated", { source: "offers.create" });
+      publishStaffEvent(restaurantId, "menu.updated", { source: "offers.create" });
       res.status(201).json(offer);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -673,6 +830,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       if (!updated) {
         return res.status(404).json({ error: "Offer not found" });
       }
+      const restaurantId = parseInt(req.params.id);
+      if (!Number.isNaN(restaurantId)) {
+        publishStaffEvent(restaurantId, "offers.updated", { source: "offers.update" });
+        publishStaffEvent(restaurantId, "menu.updated", { source: "offers.update" });
+      }
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -683,6 +845,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     try {
       const offerId = parseInt(req.params.offerId);
       await storage.deleteOffer(offerId);
+      const restaurantId = parseInt(req.params.id);
+      if (!Number.isNaN(restaurantId)) {
+        publishStaffEvent(restaurantId, "offers.updated", { source: "offers.delete" });
+        publishStaffEvent(restaurantId, "menu.updated", { source: "offers.delete" });
+      }
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -792,6 +959,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       );
 
       const fullOrder = await storage.getOrder(order.id);
+      publishStaffEvent(restaurantId, "orders.updated", { source: "orders.create" });
       res.json(fullOrder);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -822,6 +990,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const fullOrder = await storage.getOrder(order.id);
+      publishStaffEvent(existingOrder.restaurantId, "orders.updated", { source: "orders.status" });
       res.json(fullOrder);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -842,6 +1011,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const fullOrder = await storage.getOrder(order.id);
+      publishStaffEvent(order.restaurantId, "orders.updated", { source: "orders.payment" });
       res.json(fullOrder);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -948,6 +1118,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         customerId: req.session.customerId,
       });
 
+      publishStaffEvent(restaurantId, "table_calls.updated", { source: "table_calls.create" });
       res.json({
         id: call.id,
         tableNumber: data.tableNumber,
@@ -971,6 +1142,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(404).json({ error: "Table call not found" });
       }
 
+      const restaurantId = await resolveStaffRestaurantId(req);
+      if (restaurantId) {
+        publishStaffEvent(restaurantId, "table_calls.updated", { source: "table_calls.acknowledge" });
+      }
       res.json(call);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -989,6 +1164,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(404).json({ error: "Table call not found" });
       }
 
+      const restaurantId = await resolveStaffRestaurantId(req);
+      if (restaurantId) {
+        publishStaffEvent(restaurantId, "table_calls.updated", { source: "table_calls.resolve" });
+      }
       res.json(call);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -1271,6 +1450,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(404).json({ error: "Restaurant not found" });
       }
 
+      publishStaffEvent(restaurantId, "theme.updated", { source: "theme.update" });
       res.json({
         restaurantId: updated.id,
         menuThemePrimary: updated.menuThemePrimary,
@@ -1368,6 +1548,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         status: "pending",
       });
 
+      publishStaffEvent(data.restaurantId, "staff.updated", { source: "staff.join_request" });
+
       res.json({ 
         message: "Account created. Waiting for restaurant owner approval.",
         pendingApproval: true,
@@ -1419,9 +1601,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
       if (data.action === "approve") {
         const updated = await storage.approveStaffAssignment(assignment.id, req.session.staffId);
+        publishStaffEvent(restaurantId, "staff.updated", { source: "staff.approve" });
         res.json({ message: "Staff approved", assignment: updated });
       } else if (data.action === "revoke") {
         const updated = await storage.revokeStaffAssignment(assignment.id);
+        publishStaffEvent(restaurantId, "staff.updated", { source: "staff.revoke" });
         res.json({ message: "Staff access revoked", assignment: updated });
       }
     } catch (error: any) {
@@ -1479,6 +1663,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
       const itemData = { ...req.body, restaurantId };
       const item = await storage.createMenuItem(itemData);
+      publishStaffEvent(restaurantId, "menu.updated", { source: "menu.create" });
       res.json(item);
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Failed to create menu item" });
@@ -1506,6 +1691,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const updated = await storage.updateMenuItem(itemId, req.body);
+      publishStaffEvent(restaurantId, "menu.updated", { source: "menu.update" });
       res.json(updated);
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Failed to update menu item" });
@@ -1533,6 +1719,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       await storage.deleteMenuItem(itemId);
+      publishStaffEvent(restaurantId, "menu.updated", { source: "menu.delete" });
       res.json({ message: "Menu item deleted" });
     } catch (error: any) {
       res.status(400).json({ error: error.message || "Failed to delete menu item" });

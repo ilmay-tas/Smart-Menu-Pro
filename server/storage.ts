@@ -405,7 +405,7 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      for (const [ingredientId, neededQty] of requiredByIngredient.entries()) {
+      for (const [ingredientId, neededQty] of Array.from(requiredByIngredient.entries())) {
         const needed = Number(neededQty.toFixed(2));
         const [updated] = await tx.update(ingredientStocks)
           .set({ quantity: sql`${ingredientStocks.quantity} - ${needed}` })
