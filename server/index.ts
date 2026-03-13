@@ -9,6 +9,9 @@ import fs from "fs";
 const app = express();
 const httpServer = createServer(app);
 
+// Trust the first proxy so secure cookies work behind Render's TLS termination.
+app.set("trust proxy", 1);
+
 // Ensure uploads directory exists and serve it statically
 const uploadsDir = path.resolve(process.cwd(), "uploads");
 if (!fs.existsSync(uploadsDir)) {
