@@ -70,6 +70,15 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // Seed database on startup
   await seedDatabase();
 
+  // ============ HEALTH CHECK ============
+  app.get("/health", (_req, res) => {
+    res.status(200).json({ status: "ok" });
+  });
+  // Explicitly handle HEAD /health for lightweight checks.
+  app.head("/health", (_req, res) => {
+    res.status(200).end();
+  });
+
   // Session middleware
   app.use(
     session({
