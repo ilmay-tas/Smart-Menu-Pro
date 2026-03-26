@@ -441,7 +441,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   app.get("/api/menu", async (req, res) => {
     try {
       // Determine restaurant: use query param, session, or fallback default.
-      const restaurantId = resolveRestaurantIdFromRequest(req);
+      const restaurantId = await resolveRestaurantIdAsync(req);
 
       if (restaurantId) {
         req.session.restaurantId = restaurantId;
@@ -1766,7 +1766,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(401).json({ error: "Customer authentication required" });
       }
 
-      const restaurantId = resolveRestaurantIdFromRequest(req);
+      const restaurantId = await resolveRestaurantIdAsync(req);
       if (restaurantId) {
         req.session.restaurantId = restaurantId;
       }
@@ -1926,7 +1926,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   app.get("/api/menu/filtered", async (req, res) => {
     try {
       // Determine restaurant context.
-      const restaurantId = resolveRestaurantIdFromRequest(req);
+      const restaurantId = await resolveRestaurantIdAsync(req);
 
       if (restaurantId) {
         req.session.restaurantId = restaurantId;

@@ -533,7 +533,7 @@ export class DatabaseStorage implements IStorage {
     const tableIds = tables.map((t) => t.id);
     if (tableIds.length === 0) return [];
     return db.select().from(tableCalls)
-      .where(and(ne(tableCalls.status, "resolved"), sql`${tableCalls.tableId} = ANY(${tableIds})`))
+      .where(and(ne(tableCalls.status, "resolved"), inArray(tableCalls.tableId, tableIds)))
       .orderBy(desc(tableCalls.createdAt));
   }
 
