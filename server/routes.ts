@@ -86,17 +86,18 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   const isValidHexColor = (value: string): boolean => /^#([0-9a-fA-F]{6})$/.test(value);
 
-  const resolveRestaurantIdFromRequest = (req: Request): number | null => {
+  const resolveRestaurantIdAsync = async (req: Request): Promise<number | null> => {
     if (req.query.restaurantId) {
       const parsed = parseInt(req.query.restaurantId as string, 10);
-      return Number.isNaN(parsed) ? null : parsed;
+      if (!Number.isNaN(parsed)) return parsed;
     }
 
     if (req.session.restaurantId) {
       return req.session.restaurantId;
     }
 
-    return 2;
+    const restaurants = await storage.getRestaurants();
+    return restaurants.length > 0 ? restaurants[0].id : null;
   };
 
   const parsePersonalizedFlag = (req: Request): boolean =>
@@ -924,9 +925,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     try {
       const data = createOrderSchema.parse(req.body);
       
-      const restaurantId = req.query.restaurantId
-        ? parseInt(req.query.restaurantId as string)
-        : req.session.restaurantId ?? 2;
+      const restaurantId = await resolveRestaurantIdAsync(req);
       if (!restaurantId) {
         return res.status(400).json({ error: "Restaurant context is required to place an order" });
       }
@@ -1093,7 +1092,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const data = createTableCallSchema.parse(req.body);
-      const restaurantId = req.session.restaurantId ?? 2;
+      const restaurantId = await resolveRestaurantIdAsync(req);
       if (!restaurantId) {
         return res.status(400).json({ error: "Restaurant context is required to call a waiter" });
       }
@@ -1323,7 +1322,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.get("/api/theme/current", async (req, res) => {
     try {
-      const restaurantId = resolveRestaurantIdFromRequest(req);
+      const restaurantId = await resolveRestaurantIdAsync(req);
       if (!restaurantId) {
         return res.json(null);
       }
