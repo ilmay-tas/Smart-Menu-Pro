@@ -197,7 +197,7 @@ export default function CustomerMenu({
   const [isFilterApplied, setIsFilterApplied] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const [isCalorieGoalOpen, setIsCalorieGoalOpen] = useState(false);
-  const [nutritionView, setNutritionView] = useState<"daily" | "weekly">("daily");
+  const [nutritionView, setNutritionView] = useState<"daily" | "weekly" | "monthly">("daily");
   const [feedbackOrderId, setFeedbackOrderId] = useState<string | null>(null);
   const [feedbackRatings, setFeedbackRatings] = useState({ speed: 0, service: 0, taste: 0 });
   const [feedbackComment, setFeedbackComment] = useState("");
@@ -494,7 +494,8 @@ export default function CustomerMenu({
   const avg7DayNutrition = ordersData?.avg7DayNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
   const avg30DayNutrition = ordersData?.avg30DayNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
   const last30DailyNutrition = ordersData?.last30DailyNutrition || [];
-  const activeNutrition = nutritionView === "daily" ? dailyNutrition : weeklyNutrition;
+  const activeNutrition =
+    nutritionView === "daily" ? dailyNutrition : nutritionView === "weekly" ? weeklyNutrition : avg30DayNutrition;
   const macroTotal = activeNutrition.protein + activeNutrition.carbs + activeNutrition.fat;
   const macroEntries = [
     { label: "Protein", value: activeNutrition.protein, color: "bg-emerald-500" },
@@ -931,38 +932,77 @@ export default function CustomerMenu({
                       >
                         Weekly
                       </Button>
+                      <Button
+                        variant={nutritionView === "monthly" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setNutritionView("monthly")}
+                        data-testid="button-monthly-nutrition"
+                      >
+                        Monthly
+                      </Button>
                     </div>
                   </div>
                   <Card className="p-4">
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
                       <div>
-                        <p className="text-2xl font-bold">{nutritionView === "daily" ? dailyNutrition.calories : weeklyNutrition.calories}</p>
+                        <p className="text-2xl font-bold">
+                          {nutritionView === "daily"
+                            ? dailyNutrition.calories
+                            : nutritionView === "weekly"
+                              ? weeklyNutrition.calories
+                              : avg30DayNutrition.calories.toFixed(0)}
+                        </p>
                         <p className="text-sm text-muted-foreground">Calories</p>
                       </div>
                       <div>
-                        <p className="text-2xl font-bold">{(nutritionView === "daily" ? dailyNutrition.protein : weeklyNutrition.protein).toFixed(1)}g</p>
+                        <p className="text-2xl font-bold">
+                          {(
+                            nutritionView === "daily"
+                              ? dailyNutrition.protein
+                              : nutritionView === "weekly"
+                                ? weeklyNutrition.protein
+                                : avg30DayNutrition.protein
+                          ).toFixed(1)}g
+                        </p>
                         <p className="text-sm text-muted-foreground">Protein</p>
                       </div>
                       <div>
-                        <p className="text-2xl font-bold">{(nutritionView === "daily" ? dailyNutrition.carbs : weeklyNutrition.carbs).toFixed(1)}g</p>
+                        <p className="text-2xl font-bold">
+                          {(
+                            nutritionView === "daily"
+                              ? dailyNutrition.carbs
+                              : nutritionView === "weekly"
+                                ? weeklyNutrition.carbs
+                                : avg30DayNutrition.carbs
+                          ).toFixed(1)}g
+                        </p>
                         <p className="text-sm text-muted-foreground">Carbs</p>
                       </div>
                       <div>
-                        <p className="text-2xl font-bold">{(nutritionView === "daily" ? dailyNutrition.fat : weeklyNutrition.fat).toFixed(1)}g</p>
+                        <p className="text-2xl font-bold">
+                          {(
+                            nutritionView === "daily"
+                              ? dailyNutrition.fat
+                              : nutritionView === "weekly"
+                                ? weeklyNutrition.fat
+                                : avg30DayNutrition.fat
+                          ).toFixed(1)}g
+                        </p>
                         <p className="text-sm text-muted-foreground">Fat</p>
                       </div>
                     </div>
                   </Card>
-                  <Card className="p-4">
-                    <div className="flex items-center justify-between gap-4 mb-3">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Daily calorie goal</p>
-                        <p className="text-lg font-semibold">{dailyCalories.toFixed(0)} cal today</p>
+                  {nutritionView === "daily" ? (
+                    <Card className="p-4">
+                      <div className="flex items-center justify-between gap-4 mb-3">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Daily calorie goal</p>
+                          <p className="text-lg font-semibold">{dailyCalories.toFixed(0)} cal today</p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => setIsCalorieGoalOpen(true)}>
+                          Set goal
+                        </Button>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => setIsCalorieGoalOpen(true)}>
-                        Set goal
-                      </Button>
-                    </div>
                     {dailyCalorieTargetMax ? (
                       <>
                         <Progress value={targetProgress} />
@@ -1002,12 +1042,15 @@ export default function CustomerMenu({
                         </span>
                       </div>
                     </div>
-                  </Card>
+                    </Card>
+                  ) : null}
                   <Card className="p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <p className="text-sm text-muted-foreground">Macro breakdown</p>
-                        <p className="text-base font-semibold">{nutritionView === "daily" ? "Today" : "Last 7 days"}</p>
+                        <p className="text-base font-semibold">
+                          {nutritionView === "daily" ? "Today" : nutritionView === "weekly" ? "Last 7 days" : "Last 30 days"}
+                        </p>
                       </div>
                       <span className="text-xs text-muted-foreground">
                         {macroTotal > 0 ? `${macroTotal.toFixed(0)}g total` : "No macros yet"}
@@ -1030,17 +1073,23 @@ export default function CustomerMenu({
                       })}
                     </div>
                   </Card>
-                  <Card className="p-4">
+                  {nutritionView !== "daily" ? (
+                    <Card className="p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <p className="text-sm text-muted-foreground">Calories trend</p>
-                        <p className="text-base font-semibold">Last 30 days</p>
+                        <p className="text-base font-semibold">
+                          {nutritionView === "weekly" ? "Last 7 days" : "Last 30 days"}
+                        </p>
                       </div>
                       <span className="text-xs text-muted-foreground">per day</span>
                     </div>
                     <div className="h-40">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={last30DailyNutrition} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <LineChart
+                          data={nutritionView === "weekly" ? last30DailyNutrition.slice(-7) : last30DailyNutrition}
+                          margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                        >
                           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                           <XAxis dataKey="date" hide />
                           <YAxis hide />
@@ -1064,50 +1113,55 @@ export default function CustomerMenu({
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
-                  </Card>
+                    </Card>
+                  ) : null}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Card className="p-4">
-                      <p className="text-sm text-muted-foreground mb-3">Last 7 days average (per day)</p>
-                      <div className="grid grid-cols-2 gap-3 text-center">
-                        <div>
-                          <p className="text-lg font-semibold">{avg7DayNutrition.calories.toFixed(0)}</p>
-                          <p className="text-xs text-muted-foreground">Calories</p>
-                        </div>
-                        <div>
-                          <p className="text-lg font-semibold">{avg7DayNutrition.protein.toFixed(1)}g</p>
-                          <p className="text-xs text-muted-foreground">Protein</p>
-                        </div>
-                        <div>
-                          <p className="text-lg font-semibold">{avg7DayNutrition.carbs.toFixed(1)}g</p>
-                          <p className="text-xs text-muted-foreground">Carbs</p>
-                        </div>
-                        <div>
-                          <p className="text-lg font-semibold">{avg7DayNutrition.fat.toFixed(1)}g</p>
-                          <p className="text-xs text-muted-foreground">Fat</p>
-                        </div>
-                      </div>
-                    </Card>
-                    <Card className="p-4">
-                      <p className="text-sm text-muted-foreground mb-3">Last 30 days average (per day)</p>
-                      <div className="grid grid-cols-2 gap-3 text-center">
-                        <div>
-                          <p className="text-lg font-semibold">{avg30DayNutrition.calories.toFixed(0)}</p>
-                          <p className="text-xs text-muted-foreground">Calories</p>
-                        </div>
-                        <div>
-                          <p className="text-lg font-semibold">{avg30DayNutrition.protein.toFixed(1)}g</p>
-                          <p className="text-xs text-muted-foreground">Protein</p>
-                        </div>
-                        <div>
-                          <p className="text-lg font-semibold">{avg30DayNutrition.carbs.toFixed(1)}g</p>
-                          <p className="text-xs text-muted-foreground">Carbs</p>
-                        </div>
-                        <div>
-                          <p className="text-lg font-semibold">{avg30DayNutrition.fat.toFixed(1)}g</p>
-                          <p className="text-xs text-muted-foreground">Fat</p>
-                        </div>
-                      </div>
-                    </Card>
+                    {nutritionView === "daily" ? (
+                      <>
+                        <Card className="p-4">
+                          <p className="text-sm text-muted-foreground mb-3">Last 7 days average (per day)</p>
+                          <div className="grid grid-cols-2 gap-3 text-center">
+                            <div>
+                              <p className="text-lg font-semibold">{avg7DayNutrition.calories.toFixed(0)}</p>
+                              <p className="text-xs text-muted-foreground">Calories</p>
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{avg7DayNutrition.protein.toFixed(1)}g</p>
+                              <p className="text-xs text-muted-foreground">Protein</p>
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{avg7DayNutrition.carbs.toFixed(1)}g</p>
+                              <p className="text-xs text-muted-foreground">Carbs</p>
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{avg7DayNutrition.fat.toFixed(1)}g</p>
+                              <p className="text-xs text-muted-foreground">Fat</p>
+                            </div>
+                          </div>
+                        </Card>
+                        <Card className="p-4">
+                          <p className="text-sm text-muted-foreground mb-3">Last 30 days average (per day)</p>
+                          <div className="grid grid-cols-2 gap-3 text-center">
+                            <div>
+                              <p className="text-lg font-semibold">{avg30DayNutrition.calories.toFixed(0)}</p>
+                              <p className="text-xs text-muted-foreground">Calories</p>
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{avg30DayNutrition.protein.toFixed(1)}g</p>
+                              <p className="text-xs text-muted-foreground">Protein</p>
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{avg30DayNutrition.carbs.toFixed(1)}g</p>
+                              <p className="text-xs text-muted-foreground">Carbs</p>
+                            </div>
+                            <div>
+                              <p className="text-lg font-semibold">{avg30DayNutrition.fat.toFixed(1)}g</p>
+                              <p className="text-xs text-muted-foreground">Fat</p>
+                            </div>
+                          </div>
+                        </Card>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </>
