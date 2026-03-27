@@ -1900,6 +1900,15 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return orderDate >= weekAgo;
       });
 
+      const monthAgo = new Date();
+      monthAgo.setDate(monthAgo.getDate() - 30);
+      monthAgo.setHours(0, 0, 0, 0);
+
+      const last30DaysOrders = transformedOrders.filter((o) => {
+        const orderDate = new Date(o.createdAt);
+        return orderDate >= monthAgo;
+      });
+
       const dailyNutrition = todayOrders.reduce(
         (acc, order) => ({
           calories: acc.calories + order.nutrition.calories,
@@ -1920,11 +1929,47 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         { calories: 0, protein: 0, carbs: 0, fat: 0 }
       );
 
+      const last7Totals = weeklyOrders.reduce(
+        (acc, order) => ({
+          calories: acc.calories + order.nutrition.calories,
+          protein: acc.protein + order.nutrition.protein,
+          carbs: acc.carbs + order.nutrition.carbs,
+          fat: acc.fat + order.nutrition.fat,
+        }),
+        { calories: 0, protein: 0, carbs: 0, fat: 0 }
+      );
+
+      const last30Totals = last30DaysOrders.reduce(
+        (acc, order) => ({
+          calories: acc.calories + order.nutrition.calories,
+          protein: acc.protein + order.nutrition.protein,
+          carbs: acc.carbs + order.nutrition.carbs,
+          fat: acc.fat + order.nutrition.fat,
+        }),
+        { calories: 0, protein: 0, carbs: 0, fat: 0 }
+      );
+
+      const avg7DayNutrition = {
+        calories: last7Totals.calories / 7,
+        protein: last7Totals.protein / 7,
+        carbs: last7Totals.carbs / 7,
+        fat: last7Totals.fat / 7,
+      };
+
+      const avg30DayNutrition = {
+        calories: last30Totals.calories / 30,
+        protein: last30Totals.protein / 30,
+        carbs: last30Totals.carbs / 30,
+        fat: last30Totals.fat / 30,
+      };
+
       res.json({
         todayOrders,
         pastOrders,
         dailyNutrition,
         weeklyNutrition,
+        avg7DayNutrition,
+        avg30DayNutrition,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

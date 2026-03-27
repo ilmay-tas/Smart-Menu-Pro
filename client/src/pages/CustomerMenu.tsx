@@ -106,6 +106,8 @@ interface OrdersWithNutritionResponse {
   pastOrders: CustomerOrderWithNutrition[];
   dailyNutrition: { calories: number; protein: number; carbs: number; fat: number };
   weeklyNutrition: { calories: number; protein: number; carbs: number; fat: number };
+  avg7DayNutrition: { calories: number; protein: number; carbs: number; fat: number };
+  avg30DayNutrition: { calories: number; protein: number; carbs: number; fat: number };
 }
 
 interface CustomerPreferences {
@@ -477,6 +479,8 @@ export default function CustomerMenu({
   const pastOrders = ordersData?.pastOrders || [];
   const dailyNutrition = ordersData?.dailyNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
   const weeklyNutrition = ordersData?.weeklyNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+  const avg7DayNutrition = ordersData?.avg7DayNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+  const avg30DayNutrition = ordersData?.avg30DayNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
   const hasPreferences = preferences && Object.keys(preferences).some(
     (key) => {
@@ -919,6 +923,50 @@ export default function CustomerMenu({
                       </div>
                     </div>
                   </Card>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card className="p-4">
+                      <p className="text-sm text-muted-foreground mb-3">Last 7 days average (per day)</p>
+                      <div className="grid grid-cols-2 gap-3 text-center">
+                        <div>
+                          <p className="text-lg font-semibold">{avg7DayNutrition.calories.toFixed(0)}</p>
+                          <p className="text-xs text-muted-foreground">Calories</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold">{avg7DayNutrition.protein.toFixed(1)}g</p>
+                          <p className="text-xs text-muted-foreground">Protein</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold">{avg7DayNutrition.carbs.toFixed(1)}g</p>
+                          <p className="text-xs text-muted-foreground">Carbs</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold">{avg7DayNutrition.fat.toFixed(1)}g</p>
+                          <p className="text-xs text-muted-foreground">Fat</p>
+                        </div>
+                      </div>
+                    </Card>
+                    <Card className="p-4">
+                      <p className="text-sm text-muted-foreground mb-3">Last 30 days average (per day)</p>
+                      <div className="grid grid-cols-2 gap-3 text-center">
+                        <div>
+                          <p className="text-lg font-semibold">{avg30DayNutrition.calories.toFixed(0)}</p>
+                          <p className="text-xs text-muted-foreground">Calories</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold">{avg30DayNutrition.protein.toFixed(1)}g</p>
+                          <p className="text-xs text-muted-foreground">Protein</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold">{avg30DayNutrition.carbs.toFixed(1)}g</p>
+                          <p className="text-xs text-muted-foreground">Carbs</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-semibold">{avg30DayNutrition.fat.toFixed(1)}g</p>
+                          <p className="text-xs text-muted-foreground">Fat</p>
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
                 </div>
               </>
             )}
