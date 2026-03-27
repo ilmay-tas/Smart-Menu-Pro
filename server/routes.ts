@@ -1963,6 +1963,34 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         fat: last30Totals.fat / 30,
       };
 
+      const toDateKey = (date: Date): string => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      };
+
+      const dailyTotalsByDate = new Map<string, { calories: number; protein: number; carbs: number; fat: number }>();
+      for (const order of last30DaysOrders) {
+        const orderDate = new Date(order.createdAt);
+        const key = toDateKey(orderDate);
+        const current = dailyTotalsByDate.get(key) ?? { calories: 0, protein: 0, carbs: 0, fat: 0 };
+        dailyTotalsByDate.set(key, {
+          calories: current.calories + order.nutrition.calories,
+          protein: current.protein + order.nutrition.protein,
+          carbs: current.carbs + order.nutrition.carbs,
+          fat: current.fat + order.nutrition.fat,
+        });
+      }
+
+      const last30DailyNutrition = Array.from({ length: 30 }, (_, index) => {
+        const day = new Date(today);
+        day.setDate(today.getDate() - (29 - index));
+        const key = toDateKey(day);
+        const totals = dailyTotalsByDate.get(key) ?? { calories: 0, protein: 0, carbs: 0, fat: 0 };
+        return { date: key, ...totals };
+      });
+
       res.json({
         todayOrders,
         pastOrders,
@@ -1970,6 +1998,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         weeklyNutrition,
         avg7DayNutrition,
         avg30DayNutrition,
+        last30DailyNutrition,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

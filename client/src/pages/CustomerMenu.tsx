@@ -15,6 +15,16 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
 import { Plus, Minus, Leaf, WheatOff, Flame, Loader2, Bell, Clock, Package, CheckCircle, ChevronDown, ChevronUp, Filter, X, User, Settings, Star } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -108,6 +118,7 @@ interface OrdersWithNutritionResponse {
   weeklyNutrition: { calories: number; protein: number; carbs: number; fat: number };
   avg7DayNutrition: { calories: number; protein: number; carbs: number; fat: number };
   avg30DayNutrition: { calories: number; protein: number; carbs: number; fat: number };
+  last30DailyNutrition: { date: string; calories: number; protein: number; carbs: number; fat: number }[];
 }
 
 interface CustomerPreferences {
@@ -185,6 +196,7 @@ export default function CustomerMenu({
   const [isPastOrdersOpen, setIsPastOrdersOpen] = useState(false);
   const [isFilterApplied, setIsFilterApplied] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [isCalorieGoalOpen, setIsCalorieGoalOpen] = useState(false);
   const [nutritionView, setNutritionView] = useState<"daily" | "weekly">("daily");
   const [feedbackOrderId, setFeedbackOrderId] = useState<string | null>(null);
   const [feedbackRatings, setFeedbackRatings] = useState({ speed: 0, service: 0, taste: 0 });
@@ -481,6 +493,24 @@ export default function CustomerMenu({
   const weeklyNutrition = ordersData?.weeklyNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
   const avg7DayNutrition = ordersData?.avg7DayNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
   const avg30DayNutrition = ordersData?.avg30DayNutrition || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+  const last30DailyNutrition = ordersData?.last30DailyNutrition || [];
+  const activeNutrition = nutritionView === "daily" ? dailyNutrition : weeklyNutrition;
+  const macroTotal = activeNutrition.protein + activeNutrition.carbs + activeNutrition.fat;
+  const macroEntries = [
+    { label: "Protein", value: activeNutrition.protein, color: "bg-emerald-500" },
+    { label: "Carbs", value: activeNutrition.carbs, color: "bg-amber-500" },
+    { label: "Fat", value: activeNutrition.fat, color: "bg-rose-500" },
+  ];
+  const dailyCalorieTargetMax = preferences.calorieTargetMax;
+  const dailyCalorieTargetMin = preferences.calorieTargetMin;
+  const dailyCalories = dailyNutrition.calories;
+  const targetProgress = dailyCalorieTargetMax
+    ? Math.min(100, Math.max(0, (dailyCalories / dailyCalorieTargetMax) * 100))
+    : 0;
+  const remainingToMax = dailyCalorieTargetMax ? dailyCalorieTargetMax - dailyCalories : null;
+  const remainingToMin = dailyCalorieTargetMin ? dailyCalorieTargetMin - dailyCalories : null;
+  const todayVsAvg7 = dailyCalories - avg7DayNutrition.calories;
+  const todayVsAvg30 = dailyCalories - avg30DayNutrition.calories;
 
   const hasPreferences = preferences && Object.keys(preferences).some(
     (key) => {
@@ -923,6 +953,118 @@ export default function CustomerMenu({
                       </div>
                     </div>
                   </Card>
+                  <Card className="p-4">
+                    <div className="flex items-center justify-between gap-4 mb-3">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Daily calorie goal</p>
+                        <p className="text-lg font-semibold">{dailyCalories.toFixed(0)} cal today</p>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => setIsCalorieGoalOpen(true)}>
+                        Set goal
+                      </Button>
+                    </div>
+                    {dailyCalorieTargetMax ? (
+                      <>
+                        <Progress value={targetProgress} />
+                        <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
+                          <span>Goal: {dailyCalorieTargetMax} cal</span>
+                          <span>{Math.round(targetProgress)}%</span>
+                        </div>
+                        <div className="mt-3 text-sm">
+                          {remainingToMax !== null && remainingToMax >= 0 ? (
+                            <span>{Math.round(remainingToMax)} cal remaining</span>
+                          ) : (
+                            <span className="text-destructive">Over by {Math.abs(Math.round(remainingToMax || 0))} cal</span>
+                          )}
+                          {remainingToMin !== null && remainingToMin > 0 ? (
+                            <span className="ml-2 text-muted-foreground">
+                              ({Math.round(remainingToMin)} cal below minimum)
+                            </span>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Set a daily calorie target to get limit alerts.
+                      </p>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4 text-xs text-muted-foreground">
+                      <div>
+                        Today vs 7-day avg:{" "}
+                        <span className={todayVsAvg7 >= 0 ? "text-foreground" : "text-foreground"}>
+                          {todayVsAvg7 >= 0 ? "+" : ""}{todayVsAvg7.toFixed(0)} cal
+                        </span>
+                      </div>
+                      <div>
+                        Today vs 30-day avg:{" "}
+                        <span className={todayVsAvg30 >= 0 ? "text-foreground" : "text-foreground"}>
+                          {todayVsAvg30 >= 0 ? "+" : ""}{todayVsAvg30.toFixed(0)} cal
+                        </span>
+                      </div>
+                    </div>
+                  </Card>
+                  <Card className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Macro breakdown</p>
+                        <p className="text-base font-semibold">{nutritionView === "daily" ? "Today" : "Last 7 days"}</p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {macroTotal > 0 ? `${macroTotal.toFixed(0)}g total` : "No macros yet"}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {macroEntries.map((macro) => {
+                        const percent = macroTotal > 0 ? (macro.value / macroTotal) * 100 : 0;
+                        return (
+                          <div key={macro.label} className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span>{macro.label}</span>
+                              <span className="text-muted-foreground">{macro.value.toFixed(1)}g</span>
+                            </div>
+                            <div className="h-2 w-full rounded-full bg-secondary">
+                              <div className={`h-2 rounded-full ${macro.color}`} style={{ width: `${percent}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Card>
+                  <Card className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Calories trend</p>
+                        <p className="text-base font-semibold">Last 30 days</p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">per day</span>
+                    </div>
+                    <div className="h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={last30DailyNutrition} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                          <XAxis dataKey="date" hide />
+                          <YAxis hide />
+                          <Tooltip
+                            formatter={(value) => `${Number(value).toFixed(0)} cal`}
+                            labelFormatter={(label) => `Date: ${label}`}
+                            contentStyle={{
+                              backgroundColor: "hsl(var(--card))",
+                              border: "1px solid hsl(var(--border))",
+                              borderRadius: "8px",
+                            }}
+                            labelStyle={{ color: "hsl(var(--foreground))" }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="calories"
+                            stroke="hsl(var(--primary))"
+                            strokeWidth={2}
+                            dot={false}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </Card>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Card className="p-4">
                       <p className="text-sm text-muted-foreground mb-3">Last 7 days average (per day)</p>
@@ -1075,6 +1217,19 @@ export default function CustomerMenu({
             lowCarb: false,
             preferOrganic: false,
             preferLocallySourced: false,
+          };
+          updatePreferencesMutation.mutate(cleanedPrefs);
+        }}
+        isSaving={updatePreferencesMutation.isPending}
+      />
+      <CalorieGoalDialog
+        open={isCalorieGoalOpen}
+        onOpenChange={setIsCalorieGoalOpen}
+        preferences={preferences}
+        onSave={(prefs) => {
+          const cleanedPrefs: CustomerPreferences = {
+            calorieTargetMin: prefs.calorieTargetMin,
+            calorieTargetMax: prefs.calorieTargetMax,
           };
           updatePreferencesMutation.mutate(cleanedPrefs);
         }}
@@ -1262,6 +1417,72 @@ function PreferencesDialog({ open, onOpenChange, preferences, onSave, isSaving }
           <Button onClick={() => onSave(localPrefs)} disabled={isSaving}>
             {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
             Save Preferences
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface CalorieGoalDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  preferences: CustomerPreferences;
+  onSave: (prefs: CustomerPreferences) => void;
+  isSaving: boolean;
+}
+
+function CalorieGoalDialog({ open, onOpenChange, preferences, onSave, isSaving }: CalorieGoalDialogProps) {
+  const [localPrefs, setLocalPrefs] = useState<CustomerPreferences>(preferences);
+
+  const handleNumberChange = (key: keyof CustomerPreferences, value: string) => {
+    const parsed = value === "" ? undefined : Number(value);
+    setLocalPrefs({
+      ...localPrefs,
+      [key]: Number.isNaN(parsed) ? undefined : parsed,
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Daily Calorie Goal</DialogTitle>
+          <DialogDescription>
+            Set your daily calorie range to get limit alerts.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="goal-calorie-min">Minimum Calories</Label>
+            <Input
+              id="goal-calorie-min"
+              type="number"
+              min="0"
+              placeholder="e.g. 300"
+              value={localPrefs.calorieTargetMin ?? ""}
+              onChange={(e) => handleNumberChange("calorieTargetMin", e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="goal-calorie-max">Maximum Calories</Label>
+            <Input
+              id="goal-calorie-max"
+              type="number"
+              min="0"
+              placeholder="e.g. 700"
+              value={localPrefs.calorieTargetMax ?? ""}
+              onChange={(e) => handleNumberChange("calorieTargetMax", e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={() => onSave(localPrefs)} disabled={isSaving}>
+            {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            Save Goal
           </Button>
         </DialogFooter>
       </DialogContent>
