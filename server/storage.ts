@@ -984,15 +984,18 @@ export class DatabaseStorage implements IStorage {
     }
 
     const ids = popularRows.map((p) => p.menuItemId);
+    if (ids.length === 0) {
+      return [];
+    }
     const popularItems = restaurantId
       ? await db
           .select()
           .from(menuItems)
-          .where(and(sql`${menuItems.id} = ANY(${ids})`, eq(menuItems.restaurantId, restaurantId), eq(menuItems.isSoldOut, false)))
+          .where(and(inArray(menuItems.id, ids), eq(menuItems.restaurantId, restaurantId), eq(menuItems.isSoldOut, false)))
       : await db
           .select()
           .from(menuItems)
-          .where(and(sql`${menuItems.id} = ANY(${ids})`, eq(menuItems.isSoldOut, false)));
+          .where(and(inArray(menuItems.id, ids), eq(menuItems.isSoldOut, false)));
 
     const itemById = new Map(popularItems.map((item) => [item.id, item]));
     return ids.map((id) => itemById.get(id)).filter((item): item is MenuItem => Boolean(item));
