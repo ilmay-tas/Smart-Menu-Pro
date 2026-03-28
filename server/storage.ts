@@ -108,7 +108,7 @@ export interface IStorage {
   getOrders(restaurantId?: number): Promise<(OrderTicket & { items: OrderItem[] })[]>;
   getOrder(id: number): Promise<(OrderTicket & { items: OrderItem[] }) | undefined>;
   getOrdersByStatus(status: string, restaurantId?: number): Promise<(OrderTicket & { items: OrderItem[] })[]>;
-  createOrder(data: { orderNumber: string; restaurantId: number; tableId: number | null; customerId: number | null; totalAmount: string; guestCode?: string | null }): Promise<OrderTicket>;
+  createOrder(data: { orderNumber: string; restaurantId: number; tableId: number | null; customerId: number | null; totalAmount: string }): Promise<OrderTicket>;
   updateOrderStatus(id: number, status: string): Promise<OrderTicket | undefined>;
 
   // Order Items
@@ -128,7 +128,6 @@ export interface IStorage {
 
   // Customer Orders
   getOrdersByCustomer(customerId: number): Promise<(OrderTicket & { items: OrderItem[] })[]>;
-  getOrdersByGuestCode(guestCode: string, restaurantId: number, tableId?: number | null): Promise<(OrderTicket & { items: OrderItem[] })[]>;
 
   // Analytics
   getTotalRevenue(restaurantId?: number): Promise<number>;
@@ -489,7 +488,7 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async createOrder(data: { orderNumber: string; restaurantId: number; tableId: number | null; customerId: number | null; totalAmount: string; guestCode?: string | null }): Promise<OrderTicket> {
+  async createOrder(data: { orderNumber: string; restaurantId: number; tableId: number | null; customerId: number | null; totalAmount: string }): Promise<OrderTicket> {
     const [created] = await db.insert(orderTickets).values(data).returning();
     return created;
   }
@@ -581,27 +580,6 @@ export class DatabaseStorage implements IStorage {
   async getOrdersByCustomer(customerId: number): Promise<(OrderTicket & { items: OrderItem[] })[]> {
     const orders = await db.select().from(orderTickets)
       .where(eq(orderTickets.customerId, customerId))
-      .orderBy(desc(orderTickets.createdAt));
-    return Promise.all(orders.map(async (order) => {
-      const items = await this.getOrderItems(order.id);
-      return { ...order, items };
-    }));
-  }
-
-  async getOrdersByGuestCode(
-    guestCode: string,
-    restaurantId: number,
-    tableId?: number | null,
-  ): Promise<(OrderTicket & { items: OrderItem[] })[]> {
-    const conditions = [
-      eq(orderTickets.guestCode, guestCode),
-      eq(orderTickets.restaurantId, restaurantId),
-    ];
-    if (tableId) {
-      conditions.push(eq(orderTickets.tableId, tableId));
-    }
-    const orders = await db.select().from(orderTickets)
-      .where(and(...conditions))
       .orderBy(desc(orderTickets.createdAt));
     return Promise.all(orders.map(async (order) => {
       const items = await this.getOrderItems(order.id);

@@ -56,7 +56,6 @@ declare module "express-session" {
     userType: "staff" | "customer";
     restaurantId: number;
     guestOrderIds: number[];
-    guestCode: string;
   }
 }
 
@@ -113,11 +112,6 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   const parsePersonalizedFlag = (req: Request): boolean =>
     req.query.personalized === "true";
-
-  const generateGuestCode = (): string => {
-    const code = Math.floor(1000 + Math.random() * 9000);
-    return String(code);
-  };
 
   type StaffEventType =
     | "orders.updated"
@@ -960,7 +954,6 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         tableId: table?.id || null,
         customerId: req.session.customerId || null,
         totalAmount: totalAmount.toFixed(2),
-        guestCode: req.session.customerId ? null : (req.session.guestCode || generateGuestCode()),
       });
 
       // Create order items
@@ -979,9 +972,6 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       const fullOrder = await storage.getOrder(order.id);
       publishStaffEvent(restaurantId, "orders.updated", { source: "orders.create" });
       if (!req.session.customerId) {
-        if (!req.session.guestCode) {
-          req.session.guestCode = order.guestCode || generateGuestCode();
-        }
         const existing = Array.isArray(req.session.guestOrderIds) ? req.session.guestOrderIds : [];
         req.session.guestOrderIds = [...new Set([...existing, order.id])];
       }
@@ -996,7 +986,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     try {
       const ids = Array.isArray(req.session.guestOrderIds) ? req.session.guestOrderIds : [];
       if (ids.length === 0) {
-        return res.json({ code: req.session.guestCode || null, orders: [] });
+        return res.json([]);
       }
       const orders = await Promise.all(ids.map((id) => storage.getOrder(id)));
       const active = orders
@@ -1015,7 +1005,6 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
                 quantity: item.quantity,
                 modifiers: [],
                 notes: item.note,
-                unitPrice: item.unitPrice,
               };
             })
           );
@@ -1026,53 +1015,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             items: itemsWithNames,
             status: order.status,
             paymentStatus: order.paymentStatus,
-            totalAmount: order.totalAmount,
             createdAt: order.createdAt?.toISOString() || new Date().toISOString(),
           };
         })
       );
-      res.json({ code: req.session.guestCode || null, orders: transformed });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post("/api/guest/recover", async (req, res) => {
-    try {
-      const codeRaw = typeof req.body?.code === "string" ? req.body.code.trim() : "";
-      if (!/^\d{4}$/.test(codeRaw)) {
-        return res.status(400).json({ error: "Guest code must be 4 digits" });
-      }
-
-      const restaurantId = await resolveRestaurantIdAsync(req);
-      if (!restaurantId) {
-        return res.status(400).json({ error: "Restaurant context is required" });
-      }
-
-      let tableId: number | null = null;
-      if (req.body?.tableNumber !== undefined) {
-        const tableNumber = Number(req.body.tableNumber);
-        if (!Number.isNaN(tableNumber)) {
-          const table = await storage.getTableByNumber(tableNumber, restaurantId);
-          if (table) {
-            tableId = table.id;
-          }
-        }
-      }
-
-      const orders = await storage.getOrdersByGuestCode(codeRaw, restaurantId, tableId ?? undefined);
-      const active = orders.filter(
-        (order) => order.status !== "delivered" || order.paymentStatus !== "paid",
-      );
-      if (active.length === 0) {
-        return res.status(404).json({ error: "No active orders found for this code" });
-      }
-
-      req.session.guestCode = codeRaw;
-      req.session.restaurantId = restaurantId;
-      req.session.guestOrderIds = active.map((order) => order.id);
-
-      res.json({ success: true, count: active.length });
+      res.json(transformed);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

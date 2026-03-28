@@ -131,11 +131,6 @@ interface GuestOrder {
   totalAmount?: string;
 }
 
-interface GuestOrdersResponse {
-  code: string | null;
-  orders: GuestOrder[];
-}
-
 interface OrdersWithNutritionResponse {
   todayOrders: CustomerOrderWithNutrition[];
   pastOrders: CustomerOrderWithNutrition[];
@@ -231,24 +226,9 @@ export default function CustomerMenu({
   const [submittedFeedbackOrders, setSubmittedFeedbackOrders] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
-  const [guestPrefs, setGuestPrefs] = useState<CustomerPreferences>(() => {
-    if (typeof window === "undefined") return {};
-    const raw = window.sessionStorage.getItem("guestPreferences");
-    if (!raw) return {};
-    try {
-      return JSON.parse(raw) as CustomerPreferences;
-    } catch {
-      return {};
-    }
-  });
-
   const { data: menuItems = [], isLoading } = useQuery<MenuItem[]>({
-    queryKey: ["/api/menu", isFilterApplied, isGuest],
+    queryKey: ["/api/menu/filtered", isFilterApplied],
     queryFn: async () => {
-      if (isGuest) {
-        const res = await apiRequest("GET", "/api/menu?personalized=false");
-        return res.json();
-      }
       const url = isFilterApplied
         ? "/api/menu/filtered?applyFilter=true&personalized=true"
         : "/api/menu?personalized=true";
@@ -262,7 +242,7 @@ export default function CustomerMenu({
     refetchInterval: 5000,
     enabled: !isGuest,
   });
-  const { data: guestOrdersData, isLoading: isLoadingGuestOrders } = useQuery<GuestOrdersResponse>({
+  const { data: guestOrders = [], isLoading: isLoadingGuestOrders } = useQuery<GuestOrder[]>({
     queryKey: ["/api/guest/orders"],
     refetchInterval: 5000,
     enabled: isGuest,
@@ -280,8 +260,6 @@ export default function CustomerMenu({
   });
   const suggestedItems = suggestedData?.items || [];
   const suggestedItemIds = useMemo(() => new Set(suggestedItems.map((item) => item.id)), [suggestedItems]);
-  const guestOrders = guestOrdersData?.orders || [];
-  const guestCode = guestOrdersData?.code || null;
 
   // Fetch active special offers
   const { data: activeOffers = [] } = useQuery<ActiveOffer[]>({
@@ -397,30 +375,15 @@ export default function CustomerMenu({
   }, [menuItems]);
 
   const filteredItems = useMemo(() => {
-    const prefs = isGuest ? guestPrefs : preferences;
     return menuItems.filter((item) => {
       if (activeCategory !== "All" && item.category !== activeCategory) return false;
       if (activeFilter === "vegan" && !item.isVegan) return false;
       if (activeFilter === "vegetarian" && !item.isVegetarian) return false;
       if (activeFilter === "glutenFree" && !item.isGlutenFree) return false;
       if (activeFilter === "spicy" && !item.isSpicy) return false;
-      if (isFilterApplied) {
-        const dietary = (prefs.dietaryRestrictions || []).map((v) => v.toLowerCase());
-        if (dietary.includes("vegan") && !item.isVegan) return false;
-        if (dietary.includes("vegetarian") && !item.isVegetarian && !item.isVegan) return false;
-        if (dietary.includes("gluten_free") && !item.isGlutenFree) return false;
-        if (dietary.includes("halal") && !item.isHalal) return false;
-        if (dietary.includes("kosher") && !item.isKosher) return false;
-        if (prefs.avoidSpicy && item.isSpicy) return false;
-        if (prefs.preferSpicy && !item.isSpicy) return false;
-        if (prefs.avoidAlcohol && item.isAlcoholic) return false;
-        if (prefs.avoidCaffeine && item.isCaffeinated) return false;
-        if (prefs.calorieTargetMax && item.calories && item.calories > prefs.calorieTargetMax) return false;
-        if (prefs.calorieTargetMin && item.calories && item.calories < prefs.calorieTargetMin) return false;
-      }
       return true;
     });
-  }, [menuItems, activeFilter, activeCategory, isFilterApplied, isGuest, guestPrefs, preferences]);
+  }, [menuItems, activeFilter, activeCategory]);
 
   const getNutritionParts = (item: Pick<MenuItem, "calories" | "protein" | "carbs" | "fat">): string[] => {
     const parts: string[] = [];
@@ -531,9 +494,7 @@ export default function CustomerMenu({
 
   const handleToggleFilter = () => {
     setIsFilterApplied(!isFilterApplied);
-    if (!isGuest) {
-      queryClient.invalidateQueries({ queryKey: ["/api/menu"] });
-    }
+    queryClient.invalidateQueries({ queryKey: ["/api/menu/filtered", !isFilterApplied] });
   };
 
   const cartTotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -586,10 +547,9 @@ export default function CustomerMenu({
   const todayVsAvg7 = dailyCalories - avg7DayNutrition.calories;
   const todayVsAvg30 = dailyCalories - avg30DayNutrition.calories;
 
-  const prefsForCheck = isGuest ? guestPrefs : preferences;
-  const hasPreferences = prefsForCheck && Object.keys(prefsForCheck).some(
+  const hasPreferences = preferences && Object.keys(preferences).some(
     (key) => {
-      const value = prefsForCheck[key as keyof CustomerPreferences];
+      const value = preferences[key as keyof CustomerPreferences];
       if (Array.isArray(value)) return value.length > 0;
       if (typeof value === "boolean") return value;
       return !!value;
@@ -616,13 +576,15 @@ export default function CustomerMenu({
                 <p className="text-xs text-muted-foreground">Table {tableNumber}</p>
               </div>
               <DropdownMenuSeparator />
-              <>
-                <DropdownMenuItem onClick={() => setIsPreferencesOpen(true)} data-testid="button-my-filter">
-                  <Settings className="w-4 h-4 mr-2" />
-                  myFilter Preferences
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
+              {!isGuest && (
+                <>
+                  <DropdownMenuItem onClick={() => setIsPreferencesOpen(true)} data-testid="button-my-filter">
+                    <Settings className="w-4 h-4 mr-2" />
+                    myFilter Preferences
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem onClick={onLogout} data-testid="button-logout">
                 Sign Out
               </DropdownMenuItem>
@@ -1261,17 +1223,8 @@ export default function CustomerMenu({
                 <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
               </div>
             ) : (
-                <div className="space-y-4">
-                  {guestCode && (
-                    <Card className="p-4">
-                      <p className="text-sm text-muted-foreground">Your guest code</p>
-                      <p className="text-2xl font-bold tracking-widest">{guestCode}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Use this code to recover your orders if you sign out.
-                      </p>
-                    </Card>
-                  )}
-                  <h2 className="font-semibold text-lg">Active Orders</h2>
+              <div className="space-y-4">
+                <h2 className="font-semibold text-lg">Active Orders</h2>
                 {guestOrders.length === 0 ? (
                   <Card className="p-4 text-center text-muted-foreground">
                     <p>No active orders yet</p>
@@ -1405,45 +1358,39 @@ export default function CustomerMenu({
         </DialogContent>
       </Dialog>
 
-      <PreferencesDialog
-        open={isPreferencesOpen}
-        onOpenChange={setIsPreferencesOpen}
-        preferences={isGuest ? guestPrefs : preferences}
-        onSave={(prefs) => {
-          const cleanedPrefs: CustomerPreferences = {
-            dietaryRestrictions: prefs.dietaryRestrictions ?? [],
-            calorieTargetMin: prefs.calorieTargetMin,
-            calorieTargetMax: prefs.calorieTargetMax,
-            preferSpicy: prefs.preferSpicy ?? false,
-            avoidSpicy: prefs.avoidSpicy ?? false,
-            allergensToAvoid: [],
-            dislikedIngredients: [],
-            preferredCuisines: [],
-            preferredProteins: [],
-            preferredCookingMethods: [],
-            mealTypes: [],
-            beveragePreferences: [],
-            avoidAlcohol: false,
-            avoidCaffeine: false,
-            lowSodium: false,
-            lowSugar: false,
-            highProtein: false,
-            lowCarb: false,
-            preferOrganic: false,
-            preferLocallySourced: false,
-          };
-          if (isGuest) {
-            setGuestPrefs(cleanedPrefs);
-            if (typeof window !== "undefined") {
-              window.sessionStorage.setItem("guestPreferences", JSON.stringify(cleanedPrefs));
-            }
-            setIsPreferencesOpen(false);
-          } else {
+      {!isGuest && (
+        <PreferencesDialog
+          open={isPreferencesOpen}
+          onOpenChange={setIsPreferencesOpen}
+          preferences={preferences}
+          onSave={(prefs) => {
+            const cleanedPrefs: CustomerPreferences = {
+              dietaryRestrictions: prefs.dietaryRestrictions ?? [],
+              calorieTargetMin: prefs.calorieTargetMin,
+              calorieTargetMax: prefs.calorieTargetMax,
+              preferSpicy: prefs.preferSpicy ?? false,
+              avoidSpicy: prefs.avoidSpicy ?? false,
+              allergensToAvoid: [],
+              dislikedIngredients: [],
+              preferredCuisines: [],
+              preferredProteins: [],
+              preferredCookingMethods: [],
+              mealTypes: [],
+              beveragePreferences: [],
+              avoidAlcohol: false,
+              avoidCaffeine: false,
+              lowSodium: false,
+              lowSugar: false,
+              highProtein: false,
+              lowCarb: false,
+              preferOrganic: false,
+              preferLocallySourced: false,
+            };
             updatePreferencesMutation.mutate(cleanedPrefs);
-          }
-        }}
-        isSaving={!isGuest && updatePreferencesMutation.isPending}
-      />
+          }}
+          isSaving={updatePreferencesMutation.isPending}
+        />
+      )}
       {!isGuest && (
         <CalorieGoalDialog
           open={isCalorieGoalOpen}

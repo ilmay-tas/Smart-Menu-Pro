@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Phone, Loader2, User, ArrowRight, Info, X, KeyRound } from "lucide-react";
+import { Phone, Loader2, User, ArrowRight, Info, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -30,9 +30,6 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
   const [name, setName] = useState("");
   const [showNameField, setShowNameField] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
-  const [isRecoverOpen, setIsRecoverOpen] = useState(false);
-  const [recoverCode, setRecoverCode] = useState("");
-  const [recoverTable, setRecoverTable] = useState("");
   const { toast } = useToast();
 
   const formatPhoneNumber = (value: string) => {
@@ -110,28 +107,6 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
   const handleGuestContinue = () => {
     onLogin({ name: "Guest", type: "guest" });
   };
-
-  const recoverMutation = useMutation({
-    mutationFn: async () => {
-      const code = recoverCode.trim();
-      const tableNumber = recoverTable.trim() ? Number(recoverTable.trim()) : undefined;
-      const params = new URLSearchParams(window.location.search);
-      const restaurantId = params.get("restaurantId");
-      const url = restaurantId ? `/api/guest/recover?restaurantId=${encodeURIComponent(restaurantId)}` : "/api/guest/recover";
-      const res = await apiRequest("POST", url, { code, tableNumber });
-      return res.json();
-    },
-    onSuccess: () => {
-      toast({ title: "Recovered", description: "Your guest orders are available" });
-      setIsRecoverOpen(false);
-      setRecoverCode("");
-      setRecoverTable("");
-      onLogin({ name: "Guest", type: "guest" });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Unable to recover", description: error.message, variant: "destructive" });
-    },
-  });
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
@@ -349,62 +324,10 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
                 >
                   Continue as guest
                 </button>
-                <button
-                  type="button"
-                  className="w-full mt-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => setIsRecoverOpen(true)}
-                >
-                  Recover guest orders
-                </button>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
-
-      <Dialog open={isRecoverOpen} onOpenChange={setIsRecoverOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Recover Guest Orders</DialogTitle>
-            <DialogDescription>
-              Enter your 4-digit guest code to restore active orders.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="relative">
-              <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                type="text"
-                inputMode="numeric"
-                maxLength={4}
-                placeholder="4-digit code"
-                value={recoverCode}
-                onChange={(e) => setRecoverCode(e.target.value.replace(/\D/g, ""))}
-                className="pl-9 h-12 text-center tracking-widest"
-              />
-            </div>
-            <Input
-              type="number"
-              min="1"
-              placeholder="Table number (optional)"
-              value={recoverTable}
-              onChange={(e) => setRecoverTable(e.target.value)}
-              className="h-12"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsRecoverOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => recoverMutation.mutate()}
-              disabled={recoverMutation.isPending || recoverCode.trim().length !== 4}
-            >
-              {recoverMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-              Recover
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
 
       </motion.div>

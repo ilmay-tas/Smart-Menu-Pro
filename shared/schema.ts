@@ -210,7 +210,6 @@ export const orderTickets = pgTable("order_tickets", {
   restaurantId: integer("restaurant_id").notNull().references(() => restaurants.id, { onDelete: "cascade" }),
   tableId: integer("table_id").references(() => restaurantTables.id),
   customerId: integer("customer_id").references(() => customers.id),
-  guestCode: varchar("guest_code", { length: 10 }),
   status: orderStatusEnum("status").notNull().default("new"),
   paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
