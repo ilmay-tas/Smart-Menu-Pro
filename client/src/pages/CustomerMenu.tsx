@@ -131,6 +131,11 @@ interface GuestOrder {
   totalAmount?: string;
 }
 
+interface GuestOrdersResponse {
+  code: string | null;
+  orders: GuestOrder[];
+}
+
 interface OrdersWithNutritionResponse {
   todayOrders: CustomerOrderWithNutrition[];
   pastOrders: CustomerOrderWithNutrition[];
@@ -242,7 +247,7 @@ export default function CustomerMenu({
     refetchInterval: 5000,
     enabled: !isGuest,
   });
-  const { data: guestOrders = [], isLoading: isLoadingGuestOrders } = useQuery<GuestOrder[]>({
+  const { data: guestOrdersData, isLoading: isLoadingGuestOrders } = useQuery<GuestOrdersResponse>({
     queryKey: ["/api/guest/orders"],
     refetchInterval: 5000,
     enabled: isGuest,
@@ -260,6 +265,8 @@ export default function CustomerMenu({
   });
   const suggestedItems = suggestedData?.items || [];
   const suggestedItemIds = useMemo(() => new Set(suggestedItems.map((item) => item.id)), [suggestedItems]);
+  const guestOrders = guestOrdersData?.orders || [];
+  const guestCode = guestOrdersData?.code || null;
 
   // Fetch active special offers
   const { data: activeOffers = [] } = useQuery<ActiveOffer[]>({
@@ -1223,8 +1230,17 @@ export default function CustomerMenu({
                 <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              <div className="space-y-4">
-                <h2 className="font-semibold text-lg">Active Orders</h2>
+                <div className="space-y-4">
+                  {guestCode && (
+                    <Card className="p-4">
+                      <p className="text-sm text-muted-foreground">Your guest code</p>
+                      <p className="text-2xl font-bold tracking-widest">{guestCode}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Use this code to recover your orders if you sign out.
+                      </p>
+                    </Card>
+                  )}
+                  <h2 className="font-semibold text-lg">Active Orders</h2>
                 {guestOrders.length === 0 ? (
                   <Card className="p-4 text-center text-muted-foreground">
                     <p>No active orders yet</p>
