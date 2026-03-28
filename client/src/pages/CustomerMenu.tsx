@@ -612,12 +612,12 @@ export default function CustomerMenu({
                   <Flame className="w-5 h-5 text-orange-500" />
                   Suggested for You
                 </h2>
-                <ScrollArea className="w-full">
-                  <div className="flex gap-3 pb-2">
+                <div className="w-full overflow-x-auto scroll-smooth snap-x snap-proximity">
+                  <div className="flex gap-3 pb-2 min-w-max">
                     {suggestedItems.map((item) => (
                       <Card
                         key={item.id}
-                        className="min-w-[200px] max-w-[200px] overflow-hidden hover-elevate active-elevate-2 cursor-pointer flex-shrink-0"
+                        className="min-w-[200px] max-w-[200px] overflow-hidden hover-elevate active-elevate-2 cursor-pointer flex-shrink-0 snap-start"
                         onClick={() => setSelectedItem(item)}
                         data-testid={`card-suggested-item-${item.id}`}
                       >
@@ -641,7 +641,7 @@ export default function CustomerMenu({
                       </Card>
                     ))}
                   </div>
-                </ScrollArea>
+                </div>
                 <Separator />
               </div>
             )}
