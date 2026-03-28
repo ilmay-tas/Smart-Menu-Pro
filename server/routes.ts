@@ -55,6 +55,7 @@ declare module "express-session" {
     customerId: number;
     userType: "staff" | "customer";
     restaurantId: number;
+    guestOrderIds: number[];
   }
 }
 
@@ -896,6 +897,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
                 quantity: item.quantity,
                 modifiers: [],
                 notes: item.note,
+                unitPrice: item.unitPrice,
               };
             })
           );
@@ -907,6 +909,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             items: itemsWithNames,
             status: order.status,
             paymentStatus: order.paymentStatus,
+            totalAmount: order.totalAmount,
             createdAt: order.createdAt?.toISOString() || new Date().toISOString(),
           };
         })
@@ -968,9 +971,57 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
       const fullOrder = await storage.getOrder(order.id);
       publishStaffEvent(restaurantId, "orders.updated", { source: "orders.create" });
+      if (!req.session.customerId) {
+        const existing = Array.isArray(req.session.guestOrderIds) ? req.session.guestOrderIds : [];
+        req.session.guestOrderIds = [...new Set([...existing, order.id])];
+      }
       res.json(fullOrder);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Guest orders (session-based, active only)
+  app.get("/api/guest/orders", async (req, res) => {
+    try {
+      const ids = Array.isArray(req.session.guestOrderIds) ? req.session.guestOrderIds : [];
+      if (ids.length === 0) {
+        return res.json([]);
+      }
+      const orders = await Promise.all(ids.map((id) => storage.getOrder(id)));
+      const active = orders
+        .filter((order): order is NonNullable<typeof order> => Boolean(order))
+        .filter((order) => order.status !== "delivered" || order.paymentStatus !== "paid");
+      const tables = await storage.getTables(req.session.restaurantId);
+      const tableMap = Object.fromEntries(tables.map((t) => [t.id, t.tableNumber]));
+      const transformed = await Promise.all(
+        active.map(async (order) => {
+          const itemsWithNames = await Promise.all(
+            order.items.map(async (item) => {
+              const menuItem = await storage.getMenuItem(item.menuItemId);
+              return {
+                id: String(item.id),
+                name: menuItem?.name || "Unknown Item",
+                quantity: item.quantity,
+                modifiers: [],
+                notes: item.note,
+              };
+            })
+          );
+          return {
+            id: String(order.id),
+            orderNumber: order.orderNumber,
+            tableNumber: String(order.tableId ? tableMap[order.tableId] || "N/A" : "N/A"),
+            items: itemsWithNames,
+            status: order.status,
+            paymentStatus: order.paymentStatus,
+            createdAt: order.createdAt?.toISOString() || new Date().toISOString(),
+          };
+        })
+      );
+      res.json(transformed);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 

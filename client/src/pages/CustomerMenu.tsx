@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import CustomerHeader from "@/components/layout/CustomerHeader";
 import DietaryFilters, { type DietaryFilter } from "@/components/menu/DietaryFilters";
@@ -111,6 +111,26 @@ interface CustomerOrderWithNutrition {
   };
 }
 
+interface GuestOrderItem {
+  id: string;
+  name: string;
+  quantity: number;
+  modifiers?: string[] | null;
+  notes?: string | null;
+  unitPrice?: string;
+}
+
+interface GuestOrder {
+  id: string;
+  orderNumber: string;
+  tableNumber: string;
+  items: GuestOrderItem[];
+  status: "new" | "in_progress" | "ready" | "delivered";
+  createdAt: string;
+  paymentStatus?: string;
+  totalAmount?: string;
+}
+
 interface OrdersWithNutritionResponse {
   todayOrders: CustomerOrderWithNutrition[];
   pastOrders: CustomerOrderWithNutrition[];
@@ -206,12 +226,6 @@ export default function CustomerMenu({
   const [submittedFeedbackOrders, setSubmittedFeedbackOrders] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
-  useEffect(() => {
-    if (isGuest && activeTab !== "menu") {
-      setActiveTab("menu");
-    }
-  }, [isGuest, activeTab]);
-
   const { data: menuItems = [], isLoading } = useQuery<MenuItem[]>({
     queryKey: ["/api/menu/filtered", isFilterApplied],
     queryFn: async () => {
@@ -227,6 +241,11 @@ export default function CustomerMenu({
     queryKey: ["/api/customer/orders/nutrition"],
     refetchInterval: 5000,
     enabled: !isGuest,
+  });
+  const { data: guestOrders = [], isLoading: isLoadingGuestOrders } = useQuery<GuestOrder[]>({
+    queryKey: ["/api/guest/orders"],
+    refetchInterval: 5000,
+    enabled: isGuest,
   });
 
   const { data: preferences = {} as CustomerPreferences } = useQuery<CustomerPreferences>({
@@ -272,7 +291,11 @@ export default function CustomerMenu({
       setCartItems([]);
       setActiveTab("orders");
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/customer/orders/nutrition"] });
+      if (isGuest) {
+        queryClient.invalidateQueries({ queryKey: ["/api/guest/orders"] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["/api/customer/orders/nutrition"] });
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -553,11 +576,15 @@ export default function CustomerMenu({
                 <p className="text-xs text-muted-foreground">Table {tableNumber}</p>
               </div>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setIsPreferencesOpen(true)} data-testid="button-my-filter">
-                <Settings className="w-4 h-4 mr-2" />
-                myFilter Preferences
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+              {!isGuest && (
+                <>
+                  <DropdownMenuItem onClick={() => setIsPreferencesOpen(true)} data-testid="button-my-filter">
+                    <Settings className="w-4 h-4 mr-2" />
+                    myFilter Preferences
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem onClick={onLogout} data-testid="button-logout">
                 Sign Out
               </DropdownMenuItem>
@@ -571,16 +598,19 @@ export default function CustomerMenu({
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "menu" | "orders")} className="flex-1">
             <TabsList>
               <TabsTrigger value="menu" data-testid="tab-menu">Menu</TabsTrigger>
-              {!isGuest && (
-                <TabsTrigger value="orders" data-testid="tab-orders" className="relative">
-                  My Orders
-                  {todayOrders.filter(o => o.status !== "delivered").length > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                      {todayOrders.filter(o => o.status !== "delivered").length}
-                    </span>
-                  )}
-                </TabsTrigger>
-              )}
+              <TabsTrigger value="orders" data-testid="tab-orders" className="relative">
+                My Orders
+                {!isGuest && todayOrders.filter(o => o.status !== "delivered").length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                    {todayOrders.filter(o => o.status !== "delivered").length}
+                  </span>
+                )}
+                {isGuest && guestOrders.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                    {guestOrders.length}
+                  </span>
+                )}
+              </TabsTrigger>
             </TabsList>
           </Tabs>
           <div className="flex gap-2">
@@ -1182,6 +1212,72 @@ export default function CustomerMenu({
                   </div>
                 </div>
               </>
+            )}
+          </div>
+        )}
+
+        {activeTab === "orders" && isGuest && (
+          <div className="space-y-6">
+            {isLoadingGuestOrders ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <h2 className="font-semibold text-lg">Active Orders</h2>
+                {guestOrders.length === 0 ? (
+                  <Card className="p-4 text-center text-muted-foreground">
+                    <p>No active orders yet</p>
+                  </Card>
+                ) : (
+                  guestOrders.map((order) => {
+                    const StatusIcon = statusIcons[order.status];
+                    return (
+                      <Card key={order.id} className={`p-4 border-l-4 ${getStatusColor(order.status)}`} data-testid={`card-order-${order.id}`}>
+                        <div className="flex items-start justify-between gap-2 flex-wrap mb-3">
+                          <div>
+                            <h3 className="font-bold text-lg">Order #{order.orderNumber}</h3>
+                            <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                              <Clock className="w-3 h-3" />
+                              <span>{new Date(order.createdAt).toLocaleTimeString()}</span>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge variant={order.status === "delivered" ? "outline" : "default"}>
+                              <StatusIcon className="w-3 h-3 mr-1" />
+                              {statusLabels[order.status]}
+                            </Badge>
+                            {order.paymentStatus === "paid" && (
+                              <Badge variant="outline" className="text-green-600 border-green-300">
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                Paid
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="space-y-1 mb-3">
+                          {order.items.map((item) => (
+                            <div key={item.id} className="flex justify-between text-sm">
+                              <span>{item.quantity}x {item.name}</span>
+                              {item.unitPrice ? (
+                                <span className="text-muted-foreground">
+                                  {formatCurrencyTRY(parseFloat(item.unitPrice) * item.quantity)}
+                                </span>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                        {order.totalAmount ? (
+                          <div className="flex justify-between items-center pt-2 border-t">
+                            <span className="font-semibold">Total</span>
+                            <span className="font-bold">{formatCurrencyTRY(order.totalAmount)}</span>
+                          </div>
+                        ) : null}
+                      </Card>
+                    );
+                  })
+                )}
+              </div>
             )}
           </div>
         )}
