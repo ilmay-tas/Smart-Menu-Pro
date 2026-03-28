@@ -16,8 +16,13 @@ interface CustomerUser {
   type: "customer";
 }
 
+interface GuestUser {
+  name: string;
+  type: "guest";
+}
+
 interface CustomerAuthPageProps {
-  onLogin: (user: CustomerUser) => void;
+  onLogin: (user: CustomerUser | GuestUser) => void;
 }
 
 export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
@@ -97,6 +102,10 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
       return;
     }
     setShowNameField(true);
+  };
+
+  const handleGuestContinue = () => {
+    onLogin({ name: "Guest", type: "guest" });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -306,6 +315,14 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
                   onClick={handleSignUpDirect}
                 >
                   New here? <span className="underline">Sign up</span>
+                </button>
+                <button
+                  type="button"
+                  className="w-full mt-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={handleGuestContinue}
+                  data-testid="button-guest-continue"
+                >
+                  Continue as guest
                 </button>
               </motion.div>
             )}

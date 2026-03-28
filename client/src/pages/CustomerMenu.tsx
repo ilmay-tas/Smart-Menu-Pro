@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import CustomerHeader from "@/components/layout/CustomerHeader";
 import DietaryFilters, { type DietaryFilter } from "@/components/menu/DietaryFilters";
@@ -154,6 +154,7 @@ interface CustomerMenuProps {
   tableNumber?: string;
   userName?: string;
   onLogout: () => void;
+  isGuest?: boolean;
 }
 
 interface ActiveOffer {
@@ -184,6 +185,7 @@ export default function CustomerMenu({
   tableNumber = "12",
   userName = "Guest",
   onLogout,
+  isGuest = false,
 }: CustomerMenuProps) {
   const [activeFilter, setActiveFilter] = useState<DietaryFilter>("all");
   const [activeCategory, setActiveCategory] = useState<string>("All");
@@ -204,6 +206,12 @@ export default function CustomerMenu({
   const [submittedFeedbackOrders, setSubmittedFeedbackOrders] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
+  useEffect(() => {
+    if (isGuest && activeTab !== "menu") {
+      setActiveTab("menu");
+    }
+  }, [isGuest, activeTab]);
+
   const { data: menuItems = [], isLoading } = useQuery<MenuItem[]>({
     queryKey: ["/api/menu/filtered", isFilterApplied],
     queryFn: async () => {
@@ -218,15 +226,18 @@ export default function CustomerMenu({
   const { data: ordersData, isLoading: isLoadingOrders } = useQuery<OrdersWithNutritionResponse>({
     queryKey: ["/api/customer/orders/nutrition"],
     refetchInterval: 5000,
+    enabled: !isGuest,
   });
 
   const { data: preferences = {} as CustomerPreferences } = useQuery<CustomerPreferences>({
     queryKey: ["/api/customer/preferences"],
+    enabled: !isGuest,
   });
 
   // Fetch suggested items based on order history
   const { data: suggestedData } = useQuery<{ items: MenuItem[] }>({
     queryKey: ["/api/customer/suggested"],
+    enabled: !isGuest,
   });
   const suggestedItems = suggestedData?.items || [];
   const suggestedItemIds = useMemo(() => new Set(suggestedItems.map((item) => item.id)), [suggestedItems]);
@@ -560,53 +571,59 @@ export default function CustomerMenu({
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "menu" | "orders")} className="flex-1">
             <TabsList>
               <TabsTrigger value="menu" data-testid="tab-menu">Menu</TabsTrigger>
-              <TabsTrigger value="orders" data-testid="tab-orders" className="relative">
-                My Orders
-                {todayOrders.filter(o => o.status !== "delivered").length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                    {todayOrders.filter(o => o.status !== "delivered").length}
-                  </span>
-                )}
-              </TabsTrigger>
+              {!isGuest && (
+                <TabsTrigger value="orders" data-testid="tab-orders" className="relative">
+                  My Orders
+                  {todayOrders.filter(o => o.status !== "delivered").length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                      {todayOrders.filter(o => o.status !== "delivered").length}
+                    </span>
+                  )}
+                </TabsTrigger>
+              )}
             </TabsList>
           </Tabs>
           <div className="flex gap-2">
-            <Button
-              variant={isFilterApplied ? "default" : "outline"}
-              onClick={handleToggleFilter}
-              disabled={!hasPreferences}
-              data-testid="button-apply-filter"
-              size="sm"
-            >
-              {isFilterApplied ? (
-                <>
-                  <X className="w-4 h-4 mr-1" />
-                  Clear myFilter
-                </>
-              ) : (
-                <>
-                  <Filter className="w-4 h-4 mr-1" />
-                  Apply myFilter
-                </>
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleCallWaiter}
-              disabled={callWaiterMutation.isPending}
-              data-testid="button-call-waiter"
-              size="sm"
-            >
-              <Bell className="w-4 h-4 mr-1" />
-              Call Waiter
-            </Button>
+            {!isGuest && (
+              <Button
+                variant={isFilterApplied ? "default" : "outline"}
+                onClick={handleToggleFilter}
+                disabled={!hasPreferences}
+                data-testid="button-apply-filter"
+                size="sm"
+              >
+                {isFilterApplied ? (
+                  <>
+                    <X className="w-4 h-4 mr-1" />
+                    Clear myFilter
+                  </>
+                ) : (
+                  <>
+                    <Filter className="w-4 h-4 mr-1" />
+                    Apply myFilter
+                  </>
+                )}
+              </Button>
+            )}
+            {!isGuest && (
+              <Button
+                variant="outline"
+                onClick={handleCallWaiter}
+                disabled={callWaiterMutation.isPending}
+                data-testid="button-call-waiter"
+                size="sm"
+              >
+                <Bell className="w-4 h-4 mr-1" />
+                Call Waiter
+              </Button>
+            )}
           </div>
         </div>
 
         {activeTab === "menu" && (
           <>
             {/* Suggested for You Section */}
-            {suggestedItems.length > 0 && (
+            {!isGuest && suggestedItems.length > 0 && (
               <div className="space-y-3" data-testid="section-suggested">
                 <h2 className="text-lg font-semibold flex items-center gap-2">
                   <Flame className="w-5 h-5 text-orange-500" />
@@ -792,7 +809,7 @@ export default function CustomerMenu({
           </>
         )}
 
-        {activeTab === "orders" && (
+        {activeTab === "orders" && !isGuest && (
           <div className="space-y-6">
             {isLoadingOrders ? (
               <div className="flex items-center justify-center py-12">
@@ -1245,50 +1262,54 @@ export default function CustomerMenu({
         </DialogContent>
       </Dialog>
 
-      <PreferencesDialog
-        open={isPreferencesOpen}
-        onOpenChange={setIsPreferencesOpen}
-        preferences={preferences}
-        onSave={(prefs) => {
-          const cleanedPrefs: CustomerPreferences = {
-            dietaryRestrictions: prefs.dietaryRestrictions ?? [],
-            calorieTargetMin: prefs.calorieTargetMin,
-            calorieTargetMax: prefs.calorieTargetMax,
-            preferSpicy: prefs.preferSpicy ?? false,
-            avoidSpicy: prefs.avoidSpicy ?? false,
-            allergensToAvoid: [],
-            dislikedIngredients: [],
-            preferredCuisines: [],
-            preferredProteins: [],
-            preferredCookingMethods: [],
-            mealTypes: [],
-            beveragePreferences: [],
-            avoidAlcohol: false,
-            avoidCaffeine: false,
-            lowSodium: false,
-            lowSugar: false,
-            highProtein: false,
-            lowCarb: false,
-            preferOrganic: false,
-            preferLocallySourced: false,
-          };
-          updatePreferencesMutation.mutate(cleanedPrefs);
-        }}
-        isSaving={updatePreferencesMutation.isPending}
-      />
-      <CalorieGoalDialog
-        open={isCalorieGoalOpen}
-        onOpenChange={setIsCalorieGoalOpen}
-        preferences={preferences}
-        onSave={(prefs) => {
-          const cleanedPrefs: CustomerPreferences = {
-            calorieTargetMin: prefs.calorieTargetMin,
-            calorieTargetMax: prefs.calorieTargetMax,
-          };
-          updatePreferencesMutation.mutate(cleanedPrefs);
-        }}
-        isSaving={updatePreferencesMutation.isPending}
-      />
+      {!isGuest && (
+        <PreferencesDialog
+          open={isPreferencesOpen}
+          onOpenChange={setIsPreferencesOpen}
+          preferences={preferences}
+          onSave={(prefs) => {
+            const cleanedPrefs: CustomerPreferences = {
+              dietaryRestrictions: prefs.dietaryRestrictions ?? [],
+              calorieTargetMin: prefs.calorieTargetMin,
+              calorieTargetMax: prefs.calorieTargetMax,
+              preferSpicy: prefs.preferSpicy ?? false,
+              avoidSpicy: prefs.avoidSpicy ?? false,
+              allergensToAvoid: [],
+              dislikedIngredients: [],
+              preferredCuisines: [],
+              preferredProteins: [],
+              preferredCookingMethods: [],
+              mealTypes: [],
+              beveragePreferences: [],
+              avoidAlcohol: false,
+              avoidCaffeine: false,
+              lowSodium: false,
+              lowSugar: false,
+              highProtein: false,
+              lowCarb: false,
+              preferOrganic: false,
+              preferLocallySourced: false,
+            };
+            updatePreferencesMutation.mutate(cleanedPrefs);
+          }}
+          isSaving={updatePreferencesMutation.isPending}
+        />
+      )}
+      {!isGuest && (
+        <CalorieGoalDialog
+          open={isCalorieGoalOpen}
+          onOpenChange={setIsCalorieGoalOpen}
+          preferences={preferences}
+          onSave={(prefs) => {
+            const cleanedPrefs: CustomerPreferences = {
+              calorieTargetMin: prefs.calorieTargetMin,
+              calorieTargetMax: prefs.calorieTargetMax,
+            };
+            updatePreferencesMutation.mutate(cleanedPrefs);
+          }}
+          isSaving={updatePreferencesMutation.isPending}
+        />
+      )}
 
       {/* Feedback Dialog */}
       <Dialog open={feedbackOrderId !== null} onOpenChange={(open) => { if (!open) setFeedbackOrderId(null); }}>

@@ -32,7 +32,12 @@ interface CustomerUser {
   type: "customer";
 }
 
-type User = StaffUser | CustomerUser;
+interface GuestUser {
+  name: string;
+  type: "guest";
+}
+
+type User = StaffUser | CustomerUser | GuestUser;
 
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
@@ -58,7 +63,7 @@ function AppContent() {
 
   const handleLogin = (loggedInUser: User) => {
     setUser(loggedInUser);
-    if (loggedInUser.type === "customer") {
+    if (loggedInUser.type === "customer" || loggedInUser.type === "guest") {
       navigate("/");
     } else {
       // Redirect staff to their appropriate dashboard
@@ -81,7 +86,8 @@ function AppContent() {
     navigate("/");
   };
 
-  const isCustomerExperience = location.startsWith("/customer") || user?.type === "customer";
+  const isCustomerExperience =
+    location.startsWith("/customer") || user?.type === "customer" || user?.type === "guest";
 
   const { data: customerTheme } = useQuery<CustomerThemeSettings | null>({
     queryKey: ["/api/theme/current", location, user?.type ?? "guest"],
@@ -141,8 +147,13 @@ function AppContent() {
       <Route path="/">
         {!user ? (
           <LandingPage />
-        ) : user.type === "customer" ? (
-          <CustomerMenu tableNumber="12" userName={user.name} onLogout={handleLogout} />
+        ) : user.type === "customer" || user.type === "guest" ? (
+          <CustomerMenu
+            tableNumber="12"
+            userName={user.name}
+            onLogout={handleLogout}
+            isGuest={user.type === "guest"}
+          />
         ) : (
           renderStaffDashboard(user as StaffUser)
         )}
