@@ -231,9 +231,24 @@ export default function CustomerMenu({
   const [submittedFeedbackOrders, setSubmittedFeedbackOrders] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
+  const [guestPrefs, setGuestPrefs] = useState<CustomerPreferences>(() => {
+    if (typeof window === "undefined") return {};
+    const raw = window.sessionStorage.getItem("guestPreferences");
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw) as CustomerPreferences;
+    } catch {
+      return {};
+    }
+  });
+
   const { data: menuItems = [], isLoading } = useQuery<MenuItem[]>({
-    queryKey: ["/api/menu/filtered", isFilterApplied],
+    queryKey: ["/api/menu", isFilterApplied, isGuest],
     queryFn: async () => {
+      if (isGuest) {
+        const res = await apiRequest("GET", "/api/menu?personalized=false");
+        return res.json();
+      }
       const url = isFilterApplied
         ? "/api/menu/filtered?applyFilter=true&personalized=true"
         : "/api/menu?personalized=true";
@@ -382,15 +397,30 @@ export default function CustomerMenu({
   }, [menuItems]);
 
   const filteredItems = useMemo(() => {
+    const prefs = isGuest ? guestPrefs : preferences;
     return menuItems.filter((item) => {
       if (activeCategory !== "All" && item.category !== activeCategory) return false;
       if (activeFilter === "vegan" && !item.isVegan) return false;
       if (activeFilter === "vegetarian" && !item.isVegetarian) return false;
       if (activeFilter === "glutenFree" && !item.isGlutenFree) return false;
       if (activeFilter === "spicy" && !item.isSpicy) return false;
+      if (isFilterApplied) {
+        const dietary = (prefs.dietaryRestrictions || []).map((v) => v.toLowerCase());
+        if (dietary.includes("vegan") && !item.isVegan) return false;
+        if (dietary.includes("vegetarian") && !item.isVegetarian && !item.isVegan) return false;
+        if (dietary.includes("gluten_free") && !item.isGlutenFree) return false;
+        if (dietary.includes("halal") && !item.isHalal) return false;
+        if (dietary.includes("kosher") && !item.isKosher) return false;
+        if (prefs.avoidSpicy && item.isSpicy) return false;
+        if (prefs.preferSpicy && !item.isSpicy) return false;
+        if (prefs.avoidAlcohol && item.isAlcoholic) return false;
+        if (prefs.avoidCaffeine && item.isCaffeinated) return false;
+        if (prefs.calorieTargetMax && item.calories && item.calories > prefs.calorieTargetMax) return false;
+        if (prefs.calorieTargetMin && item.calories && item.calories < prefs.calorieTargetMin) return false;
+      }
       return true;
     });
-  }, [menuItems, activeFilter, activeCategory]);
+  }, [menuItems, activeFilter, activeCategory, isFilterApplied, isGuest, guestPrefs, preferences]);
 
   const getNutritionParts = (item: Pick<MenuItem, "calories" | "protein" | "carbs" | "fat">): string[] => {
     const parts: string[] = [];
@@ -501,7 +531,9 @@ export default function CustomerMenu({
 
   const handleToggleFilter = () => {
     setIsFilterApplied(!isFilterApplied);
-    queryClient.invalidateQueries({ queryKey: ["/api/menu/filtered", !isFilterApplied] });
+    if (!isGuest) {
+      queryClient.invalidateQueries({ queryKey: ["/api/menu"] });
+    }
   };
 
   const cartTotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -554,9 +586,10 @@ export default function CustomerMenu({
   const todayVsAvg7 = dailyCalories - avg7DayNutrition.calories;
   const todayVsAvg30 = dailyCalories - avg30DayNutrition.calories;
 
-  const hasPreferences = preferences && Object.keys(preferences).some(
+  const prefsForCheck = isGuest ? guestPrefs : preferences;
+  const hasPreferences = prefsForCheck && Object.keys(prefsForCheck).some(
     (key) => {
-      const value = preferences[key as keyof CustomerPreferences];
+      const value = prefsForCheck[key as keyof CustomerPreferences];
       if (Array.isArray(value)) return value.length > 0;
       if (typeof value === "boolean") return value;
       return !!value;
@@ -583,15 +616,13 @@ export default function CustomerMenu({
                 <p className="text-xs text-muted-foreground">Table {tableNumber}</p>
               </div>
               <DropdownMenuSeparator />
-              {!isGuest && (
-                <>
-                  <DropdownMenuItem onClick={() => setIsPreferencesOpen(true)} data-testid="button-my-filter">
-                    <Settings className="w-4 h-4 mr-2" />
-                    myFilter Preferences
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              )}
+              <>
+                <DropdownMenuItem onClick={() => setIsPreferencesOpen(true)} data-testid="button-my-filter">
+                  <Settings className="w-4 h-4 mr-2" />
+                  myFilter Preferences
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
               <DropdownMenuItem onClick={onLogout} data-testid="button-logout">
                 Sign Out
               </DropdownMenuItem>
@@ -1374,39 +1405,45 @@ export default function CustomerMenu({
         </DialogContent>
       </Dialog>
 
-      {!isGuest && (
-        <PreferencesDialog
-          open={isPreferencesOpen}
-          onOpenChange={setIsPreferencesOpen}
-          preferences={preferences}
-          onSave={(prefs) => {
-            const cleanedPrefs: CustomerPreferences = {
-              dietaryRestrictions: prefs.dietaryRestrictions ?? [],
-              calorieTargetMin: prefs.calorieTargetMin,
-              calorieTargetMax: prefs.calorieTargetMax,
-              preferSpicy: prefs.preferSpicy ?? false,
-              avoidSpicy: prefs.avoidSpicy ?? false,
-              allergensToAvoid: [],
-              dislikedIngredients: [],
-              preferredCuisines: [],
-              preferredProteins: [],
-              preferredCookingMethods: [],
-              mealTypes: [],
-              beveragePreferences: [],
-              avoidAlcohol: false,
-              avoidCaffeine: false,
-              lowSodium: false,
-              lowSugar: false,
-              highProtein: false,
-              lowCarb: false,
-              preferOrganic: false,
-              preferLocallySourced: false,
-            };
+      <PreferencesDialog
+        open={isPreferencesOpen}
+        onOpenChange={setIsPreferencesOpen}
+        preferences={isGuest ? guestPrefs : preferences}
+        onSave={(prefs) => {
+          const cleanedPrefs: CustomerPreferences = {
+            dietaryRestrictions: prefs.dietaryRestrictions ?? [],
+            calorieTargetMin: prefs.calorieTargetMin,
+            calorieTargetMax: prefs.calorieTargetMax,
+            preferSpicy: prefs.preferSpicy ?? false,
+            avoidSpicy: prefs.avoidSpicy ?? false,
+            allergensToAvoid: [],
+            dislikedIngredients: [],
+            preferredCuisines: [],
+            preferredProteins: [],
+            preferredCookingMethods: [],
+            mealTypes: [],
+            beveragePreferences: [],
+            avoidAlcohol: false,
+            avoidCaffeine: false,
+            lowSodium: false,
+            lowSugar: false,
+            highProtein: false,
+            lowCarb: false,
+            preferOrganic: false,
+            preferLocallySourced: false,
+          };
+          if (isGuest) {
+            setGuestPrefs(cleanedPrefs);
+            if (typeof window !== "undefined") {
+              window.sessionStorage.setItem("guestPreferences", JSON.stringify(cleanedPrefs));
+            }
+            setIsPreferencesOpen(false);
+          } else {
             updatePreferencesMutation.mutate(cleanedPrefs);
-          }}
-          isSaving={updatePreferencesMutation.isPending}
-        />
-      )}
+          }
+        }}
+        isSaving={!isGuest && updatePreferencesMutation.isPending}
+      />
       {!isGuest && (
         <CalorieGoalDialog
           open={isCalorieGoalOpen}

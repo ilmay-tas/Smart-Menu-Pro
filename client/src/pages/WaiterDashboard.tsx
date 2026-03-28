@@ -70,6 +70,8 @@ const statusLabels: Record<OrderStatus, string> = {
 export default function WaiterDashboard({ userName = "Waiter", onLogout }: WaiterDashboardProps) {
   const [activeFilter, setActiveFilter] = useState<"all" | OrderStatus>("all");
   const [activeTab, setActiveTab] = useState<"orders" | "calls">("orders");
+  const [pendingStatusIds, setPendingStatusIds] = useState<Set<string>>(new Set());
+  const [pendingPaymentIds, setPendingPaymentIds] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
   const { data: orders = [], isLoading } = useQuery<Order[]>({
@@ -102,6 +104,15 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
       toast({ title: "Order Delivered", description: "Order has been marked as delivered" });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
     },
+    onSettled: (_data, _error, variables) => {
+      if (variables?.orderId) {
+        setPendingStatusIds((prev) => {
+          const next = new Set(prev);
+          next.delete(variables.orderId);
+          return next;
+        });
+      }
+    },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
@@ -115,6 +126,15 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
     onSuccess: () => {
       toast({ title: "Payment Processed", description: "Order has been marked as paid" });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    },
+    onSettled: (_data, _error, variables) => {
+      if (variables?.orderId) {
+        setPendingPaymentIds((prev) => {
+          const next = new Set(prev);
+          next.delete(variables.orderId);
+          return next;
+        });
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -150,10 +170,12 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
   });
 
   const handleStatusChange = (orderId: string, newStatus: OrderStatus) => {
+    setPendingStatusIds((prev) => new Set(prev).add(orderId));
     updateStatusMutation.mutate({ orderId, status: newStatus });
   };
 
   const handlePayment = (orderId: string) => {
+    setPendingPaymentIds((prev) => new Set(prev).add(orderId));
     updatePaymentMutation.mutate({ orderId, paymentStatus: "paid" });
   };
 
@@ -268,7 +290,7 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
                             <Button
                               className="flex-1"
                               onClick={() => handleStatusChange(order.id, "delivered")}
-                              disabled={updateStatusMutation.isPending}
+                              disabled={pendingStatusIds.has(order.id)}
                               data-testid={`button-deliver-${order.id}`}
                             >
                               <Check className="w-4 h-4 mr-2" />
@@ -280,7 +302,7 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
                               variant="outline"
                               className="flex-1"
                               onClick={() => handlePayment(order.id)}
-                              disabled={updatePaymentMutation.isPending}
+                              disabled={pendingPaymentIds.has(order.id)}
                               data-testid={`button-payment-${order.id}`}
                             >
                               <CreditCard className="w-4 h-4 mr-2" />

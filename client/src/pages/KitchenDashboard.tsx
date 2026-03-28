@@ -61,6 +61,7 @@ const statusLabels: Record<OrderStatus, string> = {
 
 export default function KitchenDashboard({ userName = "Kitchen Staff", onLogout }: KitchenDashboardProps) {
   const [activeFilter, setActiveFilter] = useState<"all" | OrderStatus>("all");
+  const [pendingStatusIds, setPendingStatusIds] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
   const { data: orders = [], isLoading } = useQuery<Order[]>({
@@ -91,12 +92,22 @@ export default function KitchenDashboard({ userName = "Kitchen Staff", onLogout 
       toast({ title: "Order Updated", description: messages[status] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
     },
+    onSettled: (_data, _error, variables) => {
+      if (variables?.orderId) {
+        setPendingStatusIds((prev) => {
+          const next = new Set(prev);
+          next.delete(variables.orderId);
+          return next;
+        });
+      }
+    },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
 
   const handleStatusChange = (orderId: string, newStatus: OrderStatus) => {
+    setPendingStatusIds((prev) => new Set(prev).add(orderId));
     updateStatusMutation.mutate({ orderId, status: newStatus });
   };
 
@@ -202,7 +213,7 @@ export default function KitchenDashboard({ userName = "Kitchen Staff", onLogout 
                         <Button
                           className="w-full"
                           onClick={() => handleStatusChange(order.id, nextStatus)}
-                          disabled={updateStatusMutation.isPending}
+                          disabled={pendingStatusIds.has(order.id)}
                         >
                           {order.status === "new" && <ChefHat className="w-4 h-4 mr-2" />}
                           {order.status === "in_progress" && <Check className="w-4 h-4 mr-2" />}
