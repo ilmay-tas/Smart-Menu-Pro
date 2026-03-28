@@ -61,6 +61,14 @@ function AppContent() {
     checkAuth();
   }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const restaurantId = params.get("restaurantId");
+    if (restaurantId) {
+      window.sessionStorage.setItem("restaurantId", restaurantId);
+    }
+  }, [location]);
+
   const handleLogin = (loggedInUser: User) => {
     setUser(loggedInUser);
     if (loggedInUser.type === "customer" || loggedInUser.type === "guest") {
@@ -81,9 +89,18 @@ function AppContent() {
     } catch (error) {
       console.error("Logout failed:", error);
     }
+    const params = new URLSearchParams(window.location.search);
+    const restaurantId =
+      params.get("restaurantId") || window.sessionStorage.getItem("restaurantId");
+    const target =
+      user?.type === "staff"
+        ? "/staff/login"
+        : restaurantId
+          ? `/customer/login?restaurantId=${encodeURIComponent(restaurantId)}`
+          : "/";
     setUser(null);
     queryClient.clear();
-    navigate("/");
+    navigate(target);
   };
 
   const isCustomerExperience =
