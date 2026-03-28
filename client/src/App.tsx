@@ -66,6 +66,7 @@ function AppContent() {
     const restaurantId = params.get("restaurantId");
     if (restaurantId) {
       window.sessionStorage.setItem("restaurantId", restaurantId);
+      window.localStorage.setItem("restaurantId", restaurantId);
     }
   }, [location]);
 
@@ -91,7 +92,9 @@ function AppContent() {
     }
     const params = new URLSearchParams(window.location.search);
     const restaurantId =
-      params.get("restaurantId") || window.sessionStorage.getItem("restaurantId");
+      params.get("restaurantId") ||
+      window.sessionStorage.getItem("restaurantId") ||
+      window.localStorage.getItem("restaurantId");
     const target =
       user?.type === "staff"
         ? "/staff/login"
