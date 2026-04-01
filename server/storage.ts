@@ -159,7 +159,13 @@ export interface IStorage {
 
   // Suggested items based on personalized ranking
   getSuggestedItems(customerId: number, limit?: number, restaurantId?: number): Promise<RankedMenuItem[]>;
-  rankMenuItemsForCustomer(customerId: number, items: MenuItem[], restaurantId?: number, limit?: number): Promise<RankedMenuItem[]>;
+  rankMenuItemsForCustomer(
+    customerId: number,
+    items: MenuItem[],
+    restaurantId?: number,
+    limit?: number,
+    includePreferences?: boolean,
+  ): Promise<RankedMenuItem[]>;
   getPopularityByItemId(restaurantId?: number): Promise<Map<number, number>>;
   getPopularItems(limit?: number, restaurantId?: number): Promise<MenuItem[]>;
 
@@ -809,6 +815,7 @@ export class DatabaseStorage implements IStorage {
     items: MenuItem[],
     restaurantId?: number,
     limit?: number,
+    includePreferences: boolean = true,
   ): Promise<RankedMenuItem[]> {
     if (items.length === 0) {
       return [];
@@ -849,7 +856,7 @@ export class DatabaseStorage implements IStorage {
     }));
 
     const [preferences, popularityByItemId, activeOffers] = await Promise.all([
-      this.getCustomerPreferences(customerId),
+      includePreferences ? this.getCustomerPreferences(customerId) : Promise.resolve(undefined),
       this.getPopularityByItemId(restaurantId),
       restaurantId ? this.getActiveOffersByRestaurant(restaurantId) : this.getAllActiveOffers(),
     ]);

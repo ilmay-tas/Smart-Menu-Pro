@@ -474,6 +474,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
           nonSoldOut,
           restaurantId ?? undefined,
           nonSoldOut.length,
+          false,
         );
         if (ranked.length > 0) {
           sortedItems = ranked.map((entry) => entry.item);
@@ -2129,6 +2130,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
           filteredItems,
           restaurantId ?? undefined,
           filteredItems.length,
+          true,
         );
         if (ranked.length > 0) {
           sortedItems = ranked.map((entry) => entry.item);
