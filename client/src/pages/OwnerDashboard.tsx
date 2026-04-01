@@ -551,8 +551,9 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
       await apiRequest("PUT", `/api/menu-items/${id}/recipes`, { items: normalized });
       return updated;
     },
-    onSuccess: (_, { restId }) => {
+    onSuccess: (_, { restId, id }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/menu-items", id, "recipes"] });
       toast({ title: "Menu Item Updated", description: "Menu item has been updated." });
       setIsMenuDialogOpen(false);
       setEditingItem(null);
@@ -924,6 +925,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   };
 
   const openEditDialog = (item: MenuItem) => {
+    queryClient.invalidateQueries({ queryKey: ["/api/menu-items", item.id, "recipes"] });
     setEditingItem(item);
     setImagePreview(item.imageUrl || null);
     setMenuForm({
