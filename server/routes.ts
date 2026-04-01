@@ -4,24 +4,12 @@ import session from "express-session";
 import bcrypt from "bcryptjs";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 import { storage } from "./storage";
 import { seedDatabase } from "./seed";
+import { supabase, supabaseMenuBucket, supabasePublicBaseUrl } from "./supabase";
 
-// Configure multer for menu image uploads
-const uploadsDir = path.resolve(process.cwd(), "uploads", "menu-images");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, uploadsDir),
-    filename: (_req, file, cb) => {
-      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      const ext = path.extname(file.originalname);
-      cb(null, `menu-${uniqueSuffix}${ext}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (_req, file, cb) => {
     const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -1679,8 +1667,37 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       if (!req.file) {
         return res.status(400).json({ error: "No image file provided" });
       }
-      const imageUrl = `/uploads/menu-images/${req.file.filename}`;
-      res.json({ imageUrl });
+      const ext = path.extname(req.file.originalname || "");
+      const fallbackExt =
+        req.file.mimetype === "image/jpeg"
+          ? ".jpg"
+          : req.file.mimetype === "image/png"
+            ? ".png"
+            : req.file.mimetype === "image/webp"
+              ? ".webp"
+              : req.file.mimetype === "image/gif"
+                ? ".gif"
+                : "";
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      const filename = `menu-${uniqueSuffix}${ext || fallbackExt}`;
+      const objectPath = `menu-items/${filename}`;
+
+      supabase.storage
+        .from(supabaseMenuBucket)
+        .upload(objectPath, req.file.buffer, {
+          contentType: req.file.mimetype,
+          upsert: false,
+        })
+        .then(({ error }) => {
+          if (error) {
+            return res.status(500).json({ error: error.message });
+          }
+          const imageUrl = `${supabasePublicBaseUrl}/${objectPath}`;
+          res.json({ imageUrl });
+        })
+        .catch((err) => {
+          res.status(500).json({ error: err.message || "Upload failed" });
+        });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
