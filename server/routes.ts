@@ -1249,7 +1249,12 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
       const orders = await storage.getOrders(restaurantId);
       const activeOrders = orders.filter((o) => o.status !== "delivered").length;
-      const occupiedTables = tables.filter((t) => t.isOccupied).length;
+      const occupiedTableIds = new Set(
+        orders
+          .filter((o) => o.tableId && (o.status !== "delivered" || o.paymentStatus !== "paid"))
+          .map((o) => o.tableId as number)
+      );
+      const occupiedTables = occupiedTableIds.size;
       const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
       res.json({
