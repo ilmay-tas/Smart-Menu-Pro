@@ -38,10 +38,7 @@ const menuItems = {
     { title: "Orders", url: "/waiter", icon: ClipboardList },
   ],
   owner: [
-    { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-    { title: "Orders", url: "/owner/orders", icon: ClipboardList },
-    { title: "Menu", url: "/owner/menu", icon: Menu },
-    { title: "Settings", url: "/owner/settings", icon: Settings },
+    // Intentionally empty: owner uses the top tab navigation inside the dashboard.
   ],
 };
 

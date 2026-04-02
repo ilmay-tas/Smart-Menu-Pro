@@ -252,6 +252,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const [newIngredientName, setNewIngredientName] = useState("");
   const [newIngredientUnit, setNewIngredientUnit] = useState("");
   const [stockEdits, setStockEdits] = useState<Record<number, { quantity: string; lowStockThreshold: string }>>({});
+  const [pendingStockIngredientId, setPendingStockIngredientId] = useState<number | null>(null);
   const [menuIngredients, setMenuIngredients] = useState<MenuIngredientRow[]>([]);
   const [hasAutoSeededIngredients, setHasAutoSeededIngredients] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -737,9 +738,15 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         lowStockThreshold,
       });
     },
+    onMutate: ({ ingredientId }) => {
+      setPendingStockIngredientId(ingredientId);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restaurantId, "ingredient-stocks"] });
       toast({ title: "Stock Updated", description: "Ingredient stock has been updated." });
+    },
+    onSettled: () => {
+      setPendingStockIngredientId(null);
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -1735,8 +1742,11 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                                 <Button
                                   size="sm"
                                   onClick={() => handleStockSave(ingredient.id)}
-                                  disabled={upsertStockMutation.isPending}
+                                  disabled={upsertStockMutation.isPending && pendingStockIngredientId === ingredient.id}
                                 >
+                                  {upsertStockMutation.isPending && pendingStockIngredientId === ingredient.id ? (
+                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                  ) : null}
                                   Save
                                 </Button>
                               </div>
