@@ -100,9 +100,23 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
       const res = await apiRequest("PATCH", `/api/orders/${orderId}/status`, { status });
       return res.json();
     },
+    onMutate: async ({ orderId, status }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/orders"] });
+      const previousOrders = queryClient.getQueryData<Order[]>(["/api/orders"]);
+      queryClient.setQueryData<Order[]>(["/api/orders"], (old = []) =>
+        old.map((order) => (order.id === orderId ? { ...order, status } : order))
+      );
+      return { previousOrders };
+    },
     onSuccess: () => {
       toast({ title: "Order Delivered", description: "Order has been marked as delivered" });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    },
+    onError: (error: Error, _variables, context) => {
+      if (context?.previousOrders) {
+        queryClient.setQueryData(["/api/orders"], context.previousOrders);
+      }
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     },
     onSettled: (_data, _error, variables) => {
       if (variables?.orderId) {
@@ -113,9 +127,6 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
         });
       }
     },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    },
   });
 
   const updatePaymentMutation = useMutation({
@@ -123,9 +134,23 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
       const res = await apiRequest("PATCH", `/api/orders/${orderId}/payment`, { paymentStatus });
       return res.json();
     },
+    onMutate: async ({ orderId, paymentStatus }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/orders"] });
+      const previousOrders = queryClient.getQueryData<Order[]>(["/api/orders"]);
+      queryClient.setQueryData<Order[]>(["/api/orders"], (old = []) =>
+        old.map((order) => (order.id === orderId ? { ...order, paymentStatus } : order))
+      );
+      return { previousOrders };
+    },
     onSuccess: () => {
       toast({ title: "Payment Processed", description: "Order has been marked as paid" });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+    },
+    onError: (error: Error, _variables, context) => {
+      if (context?.previousOrders) {
+        queryClient.setQueryData(["/api/orders"], context.previousOrders);
+      }
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     },
     onSettled: (_data, _error, variables) => {
       if (variables?.orderId) {
@@ -135,9 +160,6 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
           return next;
         });
       }
-    },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
 
