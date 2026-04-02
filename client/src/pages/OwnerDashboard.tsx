@@ -287,17 +287,26 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const restaurantId = stableRestaurantId ?? ownerRestaurant?.id ?? null;
 
   const { data: summary, isLoading: summaryLoading } = useQuery<AnalyticsSummary>({
-    queryKey: ["/api/analytics/summary"],
+    queryKey: restaurantId
+      ? [`/api/analytics/summary?restaurantId=${restaurantId}`]
+      : ["/api/analytics/summary"],
+    enabled: !!restaurantId,
     refetchInterval: 30000,
   });
 
   const { data: topSelling = [], isLoading: topSellingLoading } = useQuery<TopSellingItem[]>({
-    queryKey: ["/api/analytics/top-selling"],
+    queryKey: restaurantId
+      ? [`/api/analytics/top-selling?restaurantId=${restaurantId}`]
+      : ["/api/analytics/top-selling"],
+    enabled: !!restaurantId,
     refetchInterval: 30000,
   });
 
   const { data: salesData = [], isLoading: salesLoading } = useQuery<SalesDataPoint[]>({
-    queryKey: ["/api/analytics/daily-revenue"],
+    queryKey: restaurantId
+      ? [`/api/analytics/daily-revenue?restaurantId=${restaurantId}`]
+      : ["/api/analytics/daily-revenue"],
+    enabled: !!restaurantId,
     refetchInterval: 30000,
   });
 
