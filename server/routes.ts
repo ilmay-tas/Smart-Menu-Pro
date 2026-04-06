@@ -10,13 +10,13 @@ import { supabase, supabaseMenuBucket, supabasePublicBaseUrl } from "./supabase"
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 1 * 1024 * 1024 }, // 1MB limit
   fileFilter: (_req, file, cb) => {
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    const allowedTypes = ["image/jpeg", "image/png"];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error("Only JPEG, PNG, WebP and GIF images are allowed"));
+      cb(new Error("Only JPEG and PNG images are allowed"));
     }
   },
 });
