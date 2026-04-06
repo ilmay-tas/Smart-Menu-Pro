@@ -883,16 +883,6 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!["image/jpeg", "image/png"].includes(file.type)) {
-      toast({ title: "Invalid Image", description: "Only JPEG or PNG images are allowed.", variant: "destructive" });
-      e.target.value = "";
-      return;
-    }
-    if (file.size > 1 * 1024 * 1024) {
-      toast({ title: "Image Too Large", description: "Menu images must be 1MB or smaller.", variant: "destructive" });
-      e.target.value = "";
-      return;
-    }
 
     // Show local preview immediately
     const reader = new FileReader();
@@ -2066,7 +2056,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
               <input
                 type="file"
                 ref={fileInputRef}
-                accept="image/jpeg,image/png"
+                accept="image/jpeg,image/png,image/webp,image/gif"
                 onChange={handleImageUpload}
                 className="hidden"
               />
