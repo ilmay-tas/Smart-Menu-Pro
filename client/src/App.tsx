@@ -13,6 +13,7 @@ import WaiterDashboard from "@/pages/WaiterDashboard";
 import OwnerDashboard from "@/pages/OwnerDashboard";
 import LandingPage from "@/pages/LandingPage";
 import NotFound from "@/pages/not-found";
+import { applyCustomerTheme, clearCustomerTheme, type CustomerThemeSettings } from "@/lib/customerTheme";
 
 type StaffRole = "waiter" | "kitchen" | "owner";
 
@@ -104,6 +105,31 @@ function AppContent() {
     queryClient.clear();
     navigate(target);
   };
+
+  const isCustomerExperience =
+    location.startsWith("/customer") || user?.type === "customer" || user?.type === "guest";
+
+  const { data: customerTheme } = useQuery<CustomerThemeSettings | null>({
+    queryKey: ["/api/theme/current", location, user?.type ?? "guest"],
+    enabled: isCustomerExperience,
+    queryFn: async () => {
+      const restaurantId = new URLSearchParams(window.location.search).get("restaurantId");
+      const url = restaurantId ? `/api/theme/current?restaurantId=${encodeURIComponent(restaurantId)}` : "/api/theme/current";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        return null;
+      }
+      return res.json();
+    },
+  });
+
+  useEffect(() => {
+    if (isCustomerExperience) {
+      applyCustomerTheme(customerTheme);
+      return;
+    }
+    clearCustomerTheme();
+  }, [isCustomerExperience, customerTheme]);
 
   if (isLoading) {
     return (

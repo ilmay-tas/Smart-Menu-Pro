@@ -94,12 +94,6 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       return req.session.restaurantId;
     }
 
-    // Default to restaurant id 2 if it exists (legacy demo behavior)
-    const preferred = await storage.getRestaurant(2);
-    if (preferred) {
-      return preferred.id;
-    }
-
     const restaurants = await storage.getRestaurants();
     return restaurants.length > 0 ? restaurants[0].id : null;
   };
