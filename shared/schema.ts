@@ -275,14 +275,7 @@ export const tableCalls = pgTable("table_calls", {
 export const insertStaffSchema = createInsertSchema(staff).omit({ id: true, createdAt: true });
 export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, createdAt: true });
 export const insertMenuItemSchema = createInsertSchema(menuItems).omit({ id: true });
-export const insertModifierSchema = createInsertSchema(modifiers)
-  .omit({ id: true })
-  .extend({
-    additionalCost: z.string().refine((value) => {
-      const num = Number(value);
-      return Number.isFinite(num) && num >= -100 && num <= 200;
-    }, "Modifier additionalCost must be between -100 and 200"),
-  });
+export const insertModifierSchema = createInsertSchema(modifiers).omit({ id: true });
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true });
 export const insertRestaurantTableSchema = createInsertSchema(restaurantTables).omit({ id: true });
 export const insertOrderTicketSchema = createInsertSchema(orderTickets).omit({ id: true, createdAt: true, completedAt: true, stockDeductedAt: true });
