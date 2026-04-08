@@ -28,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare, X, Check, Tag, Upload, ImagePlus, ClipboardList } from "lucide-react";
+import { DollarSign, ShoppingCart, Users, TrendingUp, Loader2, UserCheck, UserX, Clock, ChefHat, UtensilsCrossed, Crown, Plus, Pencil, Trash2, Menu, Star, MessageSquare, X, Check, Tag, Upload, ImagePlus, Palette, ClipboardList } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrencyTRY } from "@/lib/currency";
 import { useStaffEvents } from "@/lib/useStaffEvents";
@@ -131,6 +131,22 @@ interface Restaurant {
   isActive: boolean | null;
 }
 
+interface RestaurantTheme {
+  restaurantId: number;
+  menuThemePrimary: string | null;
+  menuThemeAccent: string | null;
+  menuThemeBackground: string | null;
+  menuThemeForeground: string | null;
+  menuThemeCard: string | null;
+}
+
+interface ThemeFormState {
+  menuThemePrimary: string;
+  menuThemeAccent: string;
+  menuThemeBackground: string;
+  menuThemeForeground: string;
+  menuThemeCard: string;
+}
 
 interface SpecialOffer {
   id: number;
@@ -172,6 +188,14 @@ interface OwnerDashboardProps {
   initialTab?: "analytics" | "staff" | "menu" | "stock" | "feedback";
 }
 
+const DEFAULT_THEME = {
+  primary: "#ec407a",
+  accent: "#ffffff",
+  background: "#f0f0f0",
+  foreground: "#1a1a1a",
+  card: "#fcfcfc",
+};
+
 const BASIC_INGREDIENTS: Array<{ name: string; unit: string }> = [
   { name: "Tomato", unit: "piece" },
   { name: "Onion", unit: "piece" },
@@ -189,6 +213,16 @@ const BASIC_INGREDIENTS: Array<{ name: string; unit: string }> = [
 ];
 
 const INGREDIENT_UNITS = ["kg", "gram", "liter", "piece"];
+
+function mapThemeToForm(theme: Partial<RestaurantTheme> | Partial<Restaurant>): ThemeFormState {
+  return {
+    menuThemePrimary: theme.menuThemePrimary || DEFAULT_THEME.primary,
+    menuThemeAccent: theme.menuThemeAccent || DEFAULT_THEME.accent,
+    menuThemeBackground: theme.menuThemeBackground || DEFAULT_THEME.background,
+    menuThemeForeground: theme.menuThemeForeground || DEFAULT_THEME.foreground,
+    menuThemeCard: theme.menuThemeCard || DEFAULT_THEME.card,
+  };
+}
 
 export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout, initialTab = "analytics" }: OwnerDashboardProps) {
   const [activeTab, setActiveTab] = useState<"analytics" | "staff" | "menu" | "stock" | "feedback">(initialTab);
@@ -236,6 +270,8 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     startDate: "",
     endDate: "",
   });
+  const [themeForm, setThemeForm] = useState<ThemeFormState>(mapThemeToForm({}));
+  const [isThemeHydrated, setIsThemeHydrated] = useState(false);
   const { toast } = useToast();
 
   const { data: ownerRestaurant, isLoading: restaurantLoading } = useQuery<Restaurant | null>({
@@ -289,6 +325,17 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     queryKey: ["/api/restaurants", restaurantId, "menu"],
     enabled: activeTab === "menu" && !!restaurantId,
     refetchInterval: activeTab === "menu" ? 30000 : false,
+  });
+
+  const themeQueryKey = ["/api/restaurants", restaurantId, "theme"] as const;
+  const {
+    data: restaurantTheme,
+    isLoading: themeLoading,
+    error: themeError,
+  } = useQuery<RestaurantTheme | null>({
+    queryKey: themeQueryKey,
+    enabled: !!restaurantId,
+    refetchInterval: 30000,
   });
 
   const { data: offersData = [], isLoading: offersLoading } = useQuery<SpecialOffer[]>({
@@ -345,6 +392,10 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
         queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restaurantId, "staff"] });
       }
 
+      if (event.type === "theme.updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restaurantId, "theme"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/theme/current"] });
+      }
     },
   });
   const stockByIngredientId = new Map(ingredientStocks.map((row) => [row.ingredientId, row]));
@@ -359,6 +410,28 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     }
     return Array.from(map.values());
   }, [ingredients]);
+  const hasCustomTheme =
+    !!restaurantTheme?.menuThemePrimary ||
+    !!restaurantTheme?.menuThemeAccent ||
+    !!restaurantTheme?.menuThemeBackground ||
+    !!restaurantTheme?.menuThemeForeground ||
+    !!restaurantTheme?.menuThemeCard;
+
+  useEffect(() => {
+    if (!ownerRestaurant) {
+      return;
+    }
+    setThemeForm(mapThemeToForm(ownerRestaurant));
+    setIsThemeHydrated(true);
+  }, [ownerRestaurant]);
+
+  useEffect(() => {
+    if (!restaurantTheme) {
+      return;
+    }
+    setThemeForm(mapThemeToForm(restaurantTheme));
+    setIsThemeHydrated(true);
+  }, [restaurantTheme]);
 
 
   useEffect(() => {
@@ -689,6 +762,73 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     },
   });
 
+  const saveThemeMutation = useMutation({
+    mutationFn: async ({
+      restId,
+      data,
+    }: {
+      restId: number;
+      data: {
+        menuThemePrimary: string | null;
+        menuThemeAccent: string | null;
+        menuThemeBackground: string | null;
+        menuThemeForeground: string | null;
+        menuThemeCard: string | null;
+      };
+    }): Promise<RestaurantTheme> => {
+      return apiRequest("PUT", `/api/restaurants/${restId}/theme`, data).then((res) => res.json());
+    },
+    onSuccess: (savedTheme, { restId }) => {
+      queryClient.setQueryData(themeQueryKey, savedTheme);
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "theme"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/theme/current"] });
+      setThemeForm(mapThemeToForm(savedTheme));
+      setIsThemeHydrated(true);
+      toast({ title: "Theme Saved", description: "Customer theme has been updated." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleThemeSave = () => {
+    if (!restaurantId || !isThemeHydrated) {
+      return;
+    }
+    saveThemeMutation.mutate({
+      restId: restaurantId,
+      data: {
+        menuThemePrimary: themeForm.menuThemePrimary,
+        menuThemeAccent: themeForm.menuThemeAccent,
+        menuThemeBackground: themeForm.menuThemeBackground,
+        menuThemeForeground: themeForm.menuThemeForeground,
+        menuThemeCard: themeForm.menuThemeCard,
+      },
+    });
+  };
+
+  const handleThemeReset = () => {
+    if (!restaurantId || !isThemeHydrated) {
+      return;
+    }
+    setThemeForm({
+      menuThemePrimary: DEFAULT_THEME.primary,
+      menuThemeAccent: DEFAULT_THEME.accent,
+      menuThemeBackground: DEFAULT_THEME.background,
+      menuThemeForeground: DEFAULT_THEME.foreground,
+      menuThemeCard: DEFAULT_THEME.card,
+    });
+    saveThemeMutation.mutate({
+      restId: restaurantId,
+      data: {
+        menuThemePrimary: null,
+        menuThemeAccent: null,
+        menuThemeBackground: null,
+        menuThemeForeground: null,
+        menuThemeCard: null,
+      },
+    });
+  };
 
   const resetOfferForm = () => {
     setOfferForm({
@@ -1193,6 +1333,82 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
               </TabsContent>
 
               <TabsContent value="menu" className="space-y-6 mt-0">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Palette className="w-4 h-4" />
+                      Customer Theme
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      If empty, MyDine default theme is used on customer auth, menu and orders screens.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-primary">Primary</Label>
+                        <Input
+                          id="theme-primary"
+                          type="color"
+                          value={themeForm.menuThemePrimary}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemePrimary: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-accent">Accent</Label>
+                        <Input
+                          id="theme-accent"
+                          type="color"
+                          value={themeForm.menuThemeAccent}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemeAccent: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-background">Background</Label>
+                        <Input
+                          id="theme-background"
+                          type="color"
+                          value={themeForm.menuThemeBackground}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemeBackground: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-foreground">Text</Label>
+                        <Input
+                          id="theme-foreground"
+                          type="color"
+                          value={themeForm.menuThemeForeground}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemeForeground: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="theme-card">Card</Label>
+                        <Input
+                          id="theme-card"
+                          type="color"
+                          value={themeForm.menuThemeCard}
+                          onChange={(e) => setThemeForm((prev) => ({ ...prev, menuThemeCard: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {hasCustomTheme ? <Badge variant="secondary">Custom theme active</Badge> : <Badge variant="outline">Using defaults</Badge>}
+                      <Button size="sm" onClick={handleThemeSave} disabled={saveThemeMutation.isPending || themeLoading || !isThemeHydrated}>
+                        {saveThemeMutation.isPending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                        Save Theme
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={handleThemeReset} disabled={saveThemeMutation.isPending || themeLoading || !isThemeHydrated}>
+                        Reset to Default
+                      </Button>
+                    </div>
+                    {themeError ? (
+                      <p className="text-xs text-destructive">
+                        Theme settings could not be loaded. Please refresh and try again.
+                      </p>
+                    ) : null}
+                  </CardContent>
+                </Card>
+
                 {/* Category Management Section */}
                 <Card>
                   <CardHeader className="pb-3">
