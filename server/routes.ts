@@ -10,14 +10,14 @@ import { supabase, supabaseMenuBucket, supabasePublicBaseUrl } from "./supabase"
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 3 * 1024 * 1024 }, // 3MB limit
   fileFilter: (_req, file, cb) => {
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    const allowedTypes = ["image/jpeg", "image/png"];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
-    } else {
-      cb(new Error("Only JPEG, PNG, WebP and GIF images are allowed"));
+      return;
     }
+    cb(new Error("Only JPEG and PNG images are allowed"));
   },
 });
 import {
@@ -1743,6 +1743,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(403).json({ error: "You don't own this restaurant" });
       }
 
+      if (typeof req.body?.description === "string" && req.body.description.length > 300) {
+        return res.status(400).json({ error: "Description must be 300 characters or less" });
+      }
+
       const itemData = { ...req.body, restaurantId };
       const item = await storage.createMenuItem(itemData);
       publishStaffEvent(restaurantId, "menu.updated", { source: "menu.create" });
@@ -1770,6 +1774,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       const existingItem = await storage.getMenuItem(itemId);
       if (!existingItem || existingItem.restaurantId !== restaurantId) {
         return res.status(404).json({ error: "Menu item not found" });
+      }
+
+      if (typeof req.body?.description === "string" && req.body.description.length > 300) {
+        return res.status(400).json({ error: "Description must be 300 characters or less" });
       }
 
       const updated = await storage.updateMenuItem(itemId, req.body);

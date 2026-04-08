@@ -883,6 +883,16 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!["image/jpeg", "image/png"].includes(file.type)) {
+      toast({ title: "Invalid Image", description: "Only JPEG or PNG images are allowed.", variant: "destructive" });
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      toast({ title: "Image Too Large", description: "Menu images must be 3MB or smaller.", variant: "destructive" });
+      e.target.value = "";
+      return;
+    }
 
     // Show local preview immediately
     const reader = new FileReader();
@@ -970,6 +980,10 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     }
     if (!menuForm.name || !menuForm.price) {
       toast({ title: "Error", description: "Name and price are required", variant: "destructive" });
+      return;
+    }
+    if (menuForm.description && menuForm.description.length > 300) {
+      toast({ title: "Error", description: "Description must be 300 characters or less", variant: "destructive" });
       return;
     }
     if (editingItem) {
@@ -1983,9 +1997,13 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                 id="description"
                 value={menuForm.description}
                 onChange={(e) => setMenuForm({ ...menuForm, description: e.target.value })}
+                maxLength={300}
                 placeholder="Describe this dish..."
                 data-testid="input-menu-description"
               />
+              <div className="text-xs text-muted-foreground text-right">
+                {(menuForm.description || "").length}/300
+              </div>
             </div>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -2056,7 +2074,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
               <input
                 type="file"
                 ref={fileInputRef}
-                accept="image/jpeg,image/png,image/webp,image/gif"
+                accept="image/jpeg,image/png"
                 onChange={handleImageUpload}
                 className="hidden"
               />

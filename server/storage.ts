@@ -255,6 +255,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createModifier(data: { name: string; additionalCost: string; menuItemId: number }): Promise<Modifier> {
+    const cost = Number(data.additionalCost);
+    if (!Number.isFinite(cost)) {
+      throw new Error("Modifier additionalCost must be a valid number");
+    }
+    if (cost < -100 || cost > 200) {
+      throw new Error("Modifier additionalCost must be between -100 and 200");
+    }
     const [created] = await db.insert(modifiers).values(data).returning();
     return created;
   }
