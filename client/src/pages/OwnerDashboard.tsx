@@ -2123,7 +2123,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                     <>
                       <ImagePlus className="w-8 h-8" />
                       <span className="text-sm">Click to upload image</span>
-                      <span className="text-xs">JPEG, PNG, WebP or GIF (max 5MB)</span>
+                      <span className="text-xs">JPEG or PNG (max 3MB)</span>
                     </>
                   )}
                 </button>
