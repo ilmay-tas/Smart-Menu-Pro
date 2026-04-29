@@ -1,6 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const { version } = require("./package.json");
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 export default defineConfig({
@@ -27,6 +30,9 @@ export default defineConfig({
     },
   },
   root: path.resolve(import.meta.dirname, "client"),
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+  },
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,

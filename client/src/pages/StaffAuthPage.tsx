@@ -449,6 +449,7 @@ export default function StaffAuthPage({ onLogin }: StaffAuthPageProps) {
 
 
       </Card>
+      <p className="text-xs text-muted-foreground mt-4">v{__APP_VERSION__}</p>
     </div>
   );
 }
