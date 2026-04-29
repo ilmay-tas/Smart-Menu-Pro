@@ -486,7 +486,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
       // Pagination support (optional query params)
       const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 200;
+      const requestedLimit = parseInt(req.query.limit as string) || 200;
+      const limit = Math.min(requestedLimit, 500);
       const startIndex = (page - 1) * limit;
       const endIndex = startIndex + limit;
       const paginatedItems = sortedItems.slice(startIndex, endIndex);
