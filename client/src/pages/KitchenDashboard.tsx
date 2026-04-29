@@ -66,7 +66,7 @@ export default function KitchenDashboard({ userName = "Kitchen Staff", onLogout 
 
   const { data: orders = [], isLoading } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
-    refetchInterval: 25000,
+    refetchInterval: 5000,
   });
 
   useStaffEvents({

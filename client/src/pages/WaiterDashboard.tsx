@@ -76,12 +76,12 @@ export default function WaiterDashboard({ userName = "Waiter", onLogout }: Waite
 
   const { data: orders = [], isLoading } = useQuery<Order[]>({
     queryKey: ["/api/orders"],
-    refetchInterval: 25000,
+    refetchInterval: 5000,
   });
 
   const { data: tableCalls = [], isLoading: isLoadingCalls } = useQuery<TableCall[]>({
     queryKey: ["/api/table-calls"],
-    refetchInterval: 25000,
+    refetchInterval: 5000,
   });
 
   useStaffEvents({
