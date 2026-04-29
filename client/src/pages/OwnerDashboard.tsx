@@ -973,6 +973,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const openEditDialog = (item: MenuItem) => {
     queryClient.invalidateQueries({ queryKey: ["/api/menu-items", item.id, "recipes"] });
     setEditingItem(item);
+    setModifierRows([]);
     setImagePreview(item.imageUrl || null);
     setMenuForm({
       name: item.name,
