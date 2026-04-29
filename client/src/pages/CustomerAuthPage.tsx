@@ -329,6 +329,7 @@ export default function CustomerAuthPage({ onLogin }: CustomerAuthPageProps) {
           </AnimatePresence>
         </div>
 
+        <p className="text-xs text-muted-foreground mt-6">v{__APP_VERSION__}</p>
 
       </motion.div>
     </div>
