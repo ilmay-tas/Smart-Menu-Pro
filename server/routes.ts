@@ -507,16 +507,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         paginatedModifiersMap
       );
       
-      // Return pagination metadata
-      res.json({
-        items: itemsWithDetails,
-        pagination: {
-          page,
-          limit,
-          total: sortedItems.length,
-          totalPages: Math.ceil(sortedItems.length / limit),
-        },
-      });
+      // Return array for backward compatibility with frontend
+      res.json(itemsWithDetails);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -2218,6 +2210,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       const modifiersMap = await storage.getModifiersForItems(menuItemIds);
 
       const itemsWithDetails = await buildCustomerMenuResponse(sortedItems, categoryMap, rankingMetaByItemId, modifiersMap);
+      // Return array for backward compatibility with frontend
       res.json(itemsWithDetails);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
