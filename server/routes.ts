@@ -201,10 +201,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     items: Awaited<ReturnType<typeof storage.getMenuItems>>,
     categoryMap: Record<number, string>,
     rankingMetaByItemId?: Map<number, { rankingScore: number; reasonLabel: string; reasonCodes: string[] }>,
+    modifiersMap?: Map<number, any>,
   ) => {
     return Promise.all(
       items.map(async (item) => {
-        const mods = await storage.getModifiersForItem(item.id);
+        const mods = modifiersMap?.get(item.id) || [];
         const rankingMeta = rankingMetaByItemId?.get(item.id);
         return {
           id: String(item.id),
@@ -238,7 +239,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
           rankingScore: rankingMeta?.rankingScore,
           reasonLabel: rankingMeta?.reasonLabel,
           reasonCodes: rankingMeta?.reasonCodes,
-          modifiers: mods.map((m) => ({
+          modifiers: (mods as any[]).map((m: any) => ({
             id: String(m.id),
             name: m.name,
             price: m.additionalCost,
@@ -479,8 +480,43 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         }
       }
 
-      const itemsWithDetails = await buildCustomerMenuResponse(sortedItems, categoryMap, rankingMetaByItemId);
-      res.json(itemsWithDetails);
+      // TC-20: Batch load modifiers for performance (single query instead of N+1)
+      const menuItemIds = sortedItems.map(item => item.id);
+      const modifiersMap = await storage.getModifiersForItems(menuItemIds);
+
+      // Pagination support (optional query params)
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 200;
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedItems = sortedItems.slice(startIndex, endIndex);
+      
+      // Create filtered modifiers map for paginated items only
+      const paginatedModifiersMap = new Map<number, any>();
+      for (const item of paginatedItems) {
+        const mods = modifiersMap.get(item.id);
+        if (mods) {
+          paginatedModifiersMap.set(item.id, mods);
+        }
+      }
+
+      const itemsWithDetails = await buildCustomerMenuResponse(
+        paginatedItems, 
+        categoryMap, 
+        rankingMetaByItemId,
+        paginatedModifiersMap
+      );
+      
+      // Return pagination metadata
+      res.json({
+        items: itemsWithDetails,
+        pagination: {
+          page,
+          limit,
+          total: sortedItems.length,
+          totalPages: Math.ceil(sortedItems.length / limit),
+        },
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -2177,7 +2213,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         }
       }
 
-      const itemsWithDetails = await buildCustomerMenuResponse(sortedItems, categoryMap, rankingMetaByItemId);
+      // TC-20: Batch load modifiers for performance
+      const menuItemIds = sortedItems.map(item => item.id);
+      const modifiersMap = await storage.getModifiersForItems(menuItemIds);
+
+      const itemsWithDetails = await buildCustomerMenuResponse(sortedItems, categoryMap, rankingMetaByItemId, modifiersMap);
       res.json(itemsWithDetails);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

@@ -72,6 +72,7 @@ export interface IStorage {
 
   // Modifiers
   getModifiersForItem(menuItemId: number): Promise<Modifier[]>;
+  getModifiersForItems(menuItemIds: number[]): Promise<Map<number, Modifier[]>>;
   createModifier(data: { name: string; additionalCost: string; menuItemId: number }): Promise<Modifier>;
 
   // Categories
@@ -252,6 +253,23 @@ export class DatabaseStorage implements IStorage {
   // Modifiers
   async getModifiersForItem(menuItemId: number): Promise<Modifier[]> {
     return db.select().from(modifiers).where(eq(modifiers.menuItemId, menuItemId));
+  }
+
+  // Batch load modifiers for multiple menu items (optimization for TC-20)
+  async getModifiersForItems(menuItemIds: number[]): Promise<Map<number, Modifier[]>> {
+    if (menuItemIds.length === 0) {
+      return new Map();
+    }
+    const allModifiers = await db.select().from(modifiers).where(inArray(modifiers.menuItemId, menuItemIds));
+    
+    // Group by menuItemId
+    const modifiersMap = new Map<number, Modifier[]>();
+    for (const mod of allModifiers) {
+      const existing = modifiersMap.get(mod.menuItemId) || [];
+      existing.push(mod);
+      modifiersMap.set(mod.menuItemId, existing);
+    }
+    return modifiersMap;
   }
 
   async createModifier(data: { name: string; additionalCost: string; menuItemId: number }): Promise<Modifier> {
