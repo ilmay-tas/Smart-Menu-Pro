@@ -258,6 +258,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [modifierRows, setModifierRows] = useState<{ name: string; additionalCost: string }[]>([]);
   const [isOfferDialogOpen, setIsOfferDialogOpen] = useState(false);
   const [editingOffer, setEditingOffer] = useState<SpecialOffer | null>(null);
   const [offerForm, setOfferForm] = useState({
@@ -361,6 +362,11 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
 
   const { data: menuItemRecipes = [], isLoading: recipesLoading } = useQuery<Array<{ ingredientId: number; quantityRequired: string | null }>>({
     queryKey: ["/api/menu-items", editingItem?.id, "recipes"],
+    enabled: isMenuDialogOpen && !!editingItem?.id,
+  });
+
+  const { data: existingModifiers = [], refetch: refetchModifiers } = useQuery<Array<{ id: number; name: string; additionalCost: string }>>({
+    queryKey: ["/api/menu-items", editingItem?.id, "modifiers"],
     enabled: isMenuDialogOpen && !!editingItem?.id,
   });
 
@@ -510,6 +516,12 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
       if (normalized.length > 0) {
         await apiRequest("PUT", `/api/menu-items/${created.id}/recipes`, { items: normalized });
       }
+      for (const mod of modifierRows.filter((m) => m.name && m.additionalCost)) {
+        await apiRequest("POST", `/api/menu-items/${created.id}/modifiers`, {
+          name: mod.name,
+          additionalCost: mod.additionalCost,
+        });
+      }
       return created;
     },
     onSuccess: (_, { restId }) => {
@@ -559,9 +571,16 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
           quantityRequired: String(row.quantityRequired),
         }));
       await apiRequest("PUT", `/api/menu-items/${id}/recipes`, { items: normalized });
+      for (const mod of modifierRows.filter((m) => m.name && m.additionalCost)) {
+        await apiRequest("POST", `/api/menu-items/${id}/modifiers`, {
+          name: mod.name,
+          additionalCost: mod.additionalCost,
+        });
+      }
       return updated;
     },
     onSuccess: (_, { restId, id }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/menu-items", id, "modifiers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurants", restId, "menu"] });
       queryClient.invalidateQueries({ queryKey: ["/api/menu-items", id, "recipes"] });
       toast({ title: "Menu Item Updated", description: "Menu item has been updated." });
@@ -947,6 +966,7 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
     setEditingItem(null);
     resetMenuForm();
     setMenuIngredients([]);
+    setModifierRows([]);
     setIsMenuDialogOpen(true);
   };
 
@@ -2246,6 +2266,77 @@ export default function OwnerDashboard({ userName = "Restaurant Owner", onLogout
                 data-testid="switch-sold-out"
               />
               <Label htmlFor="isSoldOut">Sold Out</Label>
+            </div>
+
+            {/* Modifiers */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Modifiers</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setModifierRows((prev) => [...prev, { name: "", additionalCost: "" }])}
+                >
+                  <Plus className="w-3 h-3 mr-1" /> Add Modifier
+                </Button>
+              </div>
+
+              {/* Existing modifiers (edit mode) */}
+              {editingItem && existingModifiers.map((mod) => (
+                <div key={mod.id} className="flex items-center gap-2">
+                  <span className="flex-1 text-sm">{mod.name}</span>
+                  <span className="text-sm text-muted-foreground">+{mod.additionalCost}₺</span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    onClick={async () => {
+                      await apiRequest("DELETE", `/api/modifiers/${mod.id}`);
+                      refetchModifiers();
+                    }}
+                  >
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              ))}
+
+              {/* New modifier rows */}
+              {modifierRows.map((row, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    placeholder="Name (e.g. Extra Cheese)"
+                    value={row.name}
+                    onChange={(e) =>
+                      setModifierRows((prev) =>
+                        prev.map((r, i) => (i === index ? { ...r, name: e.target.value } : r))
+                      )
+                    }
+                    className="flex-1"
+                  />
+                  <Input
+                    placeholder="Price"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={row.additionalCost}
+                    onChange={(e) =>
+                      setModifierRows((prev) =>
+                        prev.map((r, i) => (i === index ? { ...r, additionalCost: e.target.value } : r))
+                      )
+                    }
+                    className="w-24"
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => setModifierRows((prev) => prev.filter((_, i) => i !== index))}
+                  >
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              ))}
             </div>
           </div>
           <DialogFooter>

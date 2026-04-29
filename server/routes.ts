@@ -687,6 +687,47 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
+  // ============ MODIFIERS ============
+  app.get("/api/menu-items/:id/modifiers", async (req, res) => {
+    try {
+      const menuItemId = parseInt(req.params.id);
+      const mods = await storage.getModifiersForItem(menuItemId);
+      res.json(mods);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/menu-items/:id/modifiers", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const menuItemId = parseInt(req.params.id);
+      const { name, additionalCost } = req.body;
+      if (!name || !additionalCost) {
+        return res.status(400).json({ error: "name and additionalCost are required" });
+      }
+      const modifier = await storage.createModifier({ name, additionalCost: String(additionalCost), menuItemId });
+      res.json(modifier);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/modifiers/:id", async (req, res) => {
+    try {
+      if (req.session.userType !== "staff" || req.session.staffRole !== "owner") {
+        return res.status(403).json({ error: "Owner access required" });
+      }
+      const id = parseInt(req.params.id);
+      await storage.deleteModifier(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ============ MENU ITEM RECIPES ============
   app.get("/api/menu-items/:id/recipes", async (req, res) => {
     try {

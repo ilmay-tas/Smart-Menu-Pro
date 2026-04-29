@@ -74,6 +74,7 @@ export interface IStorage {
   getModifiersForItem(menuItemId: number): Promise<Modifier[]>;
   getModifiersForItems(menuItemIds: number[]): Promise<Map<number, Modifier[]>>;
   createModifier(data: { name: string; additionalCost: string; menuItemId: number }): Promise<Modifier>;
+  deleteModifier(id: number): Promise<boolean>;
 
   // Categories
   getCategories(): Promise<Category[]>;
@@ -275,6 +276,11 @@ export class DatabaseStorage implements IStorage {
   async createModifier(data: { name: string; additionalCost: string; menuItemId: number }): Promise<Modifier> {
     const [created] = await db.insert(modifiers).values(data).returning();
     return created;
+  }
+
+  async deleteModifier(id: number): Promise<boolean> {
+    await db.delete(modifiers).where(eq(modifiers.id, id));
+    return true;
   }
 
   // Categories
