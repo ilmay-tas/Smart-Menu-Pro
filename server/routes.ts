@@ -705,10 +705,14 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
       const menuItemId = parseInt(req.params.id);
       const { name, additionalCost } = req.body;
-      if (!name || !additionalCost) {
+      if (!name || additionalCost === undefined || additionalCost === null) {
         return res.status(400).json({ error: "name and additionalCost are required" });
       }
-      const modifier = await storage.createModifier({ name, additionalCost: String(additionalCost), menuItemId });
+      const cost = parseFloat(additionalCost);
+      if (isNaN(cost) || cost < -100 || cost > 200) {
+        return res.status(400).json({ error: "additionalCost must be between -100 and 200" });
+      }
+      const modifier = await storage.createModifier({ name, additionalCost: String(cost), menuItemId });
       res.json(modifier);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
