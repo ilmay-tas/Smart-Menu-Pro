@@ -1005,7 +1005,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(400).json({ error: "Restaurant context is required to place an order" });
       }
 
-      const totalAmount = data.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+      const subtotal = data.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+      const totalAmount = subtotal * 1.1;
       const totalOrders = await storage.getTotalOrders(restaurantId);
       const orderNumber = String(totalOrders + 1).padStart(3, "0");
 
