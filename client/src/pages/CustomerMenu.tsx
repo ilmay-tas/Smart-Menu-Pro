@@ -430,18 +430,32 @@ export default function CustomerMenu({
     const { discountedUnitPrice } = getPricingForItem(selectedItem);
     const itemPrice = discountedUnitPrice + modifierTotal;
 
-    const newCartItem: CartItemData = {
-      id: `${selectedItem.id}-${Date.now()}`,
-      menuItemId: selectedItem.id,
-      name: selectedItem.name,
-      price: itemPrice,
-      quantity,
-      image: selectedItem.image,
-      modifiers: selectedModifiers,
-      modifierNames: modifierDetails.map((m) => m.name),
-    };
+    const sortedSelected = [...selectedModifiers].sort();
+    const existingIndex = cartItems.findIndex(
+      (item) =>
+        item.menuItemId === selectedItem.id &&
+        JSON.stringify([...item.modifiers].sort()) === JSON.stringify(sortedSelected)
+    );
 
-    setCartItems((prev) => [...prev, newCartItem]);
+    if (existingIndex !== -1) {
+      setCartItems((prev) =>
+        prev.map((item, i) =>
+          i === existingIndex ? { ...item, quantity: item.quantity + quantity } : item
+        )
+      );
+    } else {
+      const newCartItem: CartItemData = {
+        id: `${selectedItem.id}-${Date.now()}`,
+        menuItemId: selectedItem.id,
+        name: selectedItem.name,
+        price: itemPrice,
+        quantity,
+        image: selectedItem.image,
+        modifiers: selectedModifiers,
+        modifierNames: modifierDetails.map((m) => m.name),
+      };
+      setCartItems((prev) => [...prev, newCartItem]);
+    }
     toast({ title: "Added to cart", description: `${quantity}x ${selectedItem.name} added` });
     setSelectedItem(null);
     setQuantity(1);
