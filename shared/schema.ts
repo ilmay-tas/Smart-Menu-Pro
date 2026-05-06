@@ -326,7 +326,7 @@ export type InsertSpecialOffer = z.infer<typeof insertSpecialOfferSchema>;
 // API Request/Response Schemas
 export const staffSignUpSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
   name: z.string().min(1, "Name is required"),
   role: z.enum(["waiter", "kitchen", "owner"]),
 });
@@ -390,14 +390,14 @@ export const createRestaurantSchema = z.object({
 
 export const ownerStaffSignUpSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
   name: z.string().min(1, "Name is required"),
   restaurant: createRestaurantSchema,
 });
 
 export const staffJoinRestaurantSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
   name: z.string().min(1, "Name is required"),
   role: z.enum(["waiter", "kitchen"]),
   restaurantId: z.number().min(1, "Please select a restaurant"),
