@@ -321,6 +321,9 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
       res.json({ user: { id: staff.id, name: staff.name, username: staff.username, role: staff.role, type: "staff" } });
     } catch (error: any) {
+      if (error instanceof ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
       res.status(400).json({ error: error.message || "Invalid request" });
     }
   });
@@ -1635,11 +1638,14 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       req.session.staffRole = staffMember.role;
       req.session.userType = "staff";
 
-      res.json({ 
+      res.json({
         user: { id: staffMember.id, name: staffMember.name, username: staffMember.username, role: staffMember.role, type: "staff" },
         restaurant,
       });
     } catch (error: any) {
+      if (error instanceof ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
       res.status(400).json({ error: error.message || "Invalid request" });
     }
   });
@@ -1679,11 +1685,14 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
       publishStaffEvent(data.restaurantId, "staff.updated", { source: "staff.join_request" });
 
-      res.json({ 
+      res.json({
         message: "Account created. Waiting for restaurant owner approval.",
         pendingApproval: true,
       });
     } catch (error: any) {
+      if (error instanceof ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
       res.status(400).json({ error: error.message || "Invalid request" });
     }
   });
